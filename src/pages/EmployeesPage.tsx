@@ -101,7 +101,9 @@ export function EmployeesPage() {
 
   /** Kalau karyawan belum punya outlet, manager tidak bisa update profile_id (RLS); Buat Akun akan gagal mengaitkan. */
   function needsOutletForAccount(emp: Employee): boolean {
-    return (profile?.role === 'manager' && !emp.outlet_id) || (profile?.role === 'manager' && outletId && emp.outlet_id !== outletId)
+    return Boolean(
+      (profile?.role === 'manager' && !emp.outlet_id) || (profile?.role === 'manager' && outletId && emp.outlet_id !== outletId)
+    )
   }
 
   async function handleCreateAccount(e: React.FormEvent) {

@@ -53,11 +53,13 @@ export function OutletProvider({ children }: { children: ReactNode }) {
           setLoading(false)
         })
     } else if (profile.employee_id) {
-      supabase
-        .from('employees')
-        .select('outlet_id, outlets(id, name, code, address, is_active, created_at, updated_at)')
-        .eq('id', profile.employee_id)
-        .single()
+      Promise.resolve(
+        supabase
+          .from('employees')
+          .select('outlet_id, outlets(id, name, code, address, is_active, created_at, updated_at)')
+          .eq('id', profile.employee_id)
+          .single()
+      )
         .then(({ data }) => {
           const row = data as { outlet_id: string; outlets: Outlet } | null
           if (row?.outlet_id) {

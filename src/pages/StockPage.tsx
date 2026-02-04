@@ -67,7 +67,7 @@ export function StockPage() {
       .eq('outlet_id', outletId)
       .order('created_at', { ascending: false })
       .limit(100)
-    setMovements((data as MovementRow[]) ?? [])
+    setMovements((data as unknown as MovementRow[]) ?? [])
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -80,7 +80,7 @@ export function StockPage() {
       return
     }
     setSubmitting(true)
-    const { data, error: rpcError } = await supabase.rpc('record_stock_in', {
+    const { error: rpcError } = await supabase.rpc('record_stock_in', {
       p_outlet_id: outletId,
       p_product_id: form.product_id,
       p_quantity: qty,
