@@ -142,7 +142,7 @@ export function ProductsPage() {
         </div>
         <div className="flex gap-2">
           <button type="submit" className="btn-primary">{editing ? 'Simpan' : 'Tambah'}</button>
-          {editing && <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm({ sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_active: true }); }}>Batal</button>}
+          {editing && <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm({ sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_service: false, is_active: true }); }}>Batal</button>}
         </div>
       </form>
       <div className="card mt-4 overflow-x-auto">

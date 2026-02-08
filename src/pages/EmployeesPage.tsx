@@ -55,20 +55,25 @@ function BarberDetailModal({
         : period === 'month'
           ? `${month}-${String(new Date(parseInt(month.slice(0, 4), 10), parseInt(month.slice(5, 7), 10), 0).getDate()).padStart(2, '0')}T23:59:59`
           : `${year}-12-31T23:59:59`
-    supabase
-      .from('transactions')
-      .select(txnSelect)
-      .eq('outlet_id', outletId)
-      .eq('barber_id', employee.id)
-      .eq('status', 'completed')
-      .gte('created_at', start)
-      .lte('created_at', end)
-      .order('created_at', { ascending: true })
-      .limit(5000)
-      .then(({ data }) => {
-        setTxns((data as TxnRow[]) ?? [])
-      })
-      .finally(() => setLoading(false))
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('transactions')
+          .select(txnSelect)
+          .eq('outlet_id', outletId)
+          .eq('barber_id', employee.id)
+          .eq('status', 'completed')
+          .gte('created_at', start)
+          .lte('created_at', end)
+          .order('created_at', { ascending: true })
+          .limit(5000)
+        setTxns(((data as unknown) as TxnRow[]) ?? [])
+      } catch {
+        setTxns([])
+      } finally {
+        setLoading(false)
+      }
+    })()
   }, [outletId, employee.id, period, date, month, year])
 
   useEffect(() => {

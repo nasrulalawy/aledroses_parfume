@@ -109,7 +109,7 @@ export function OutletsPage() {
         <div className="flex gap-2">
           <button type="submit" className="btn-primary">{editing ? 'Simpan' : 'Tambah outlet'}</button>
           {editing && (
-            <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm({ name: '', code: '', address: '', is_active: true }); }}>
+            <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm({ name: '', code: '', address: '', outlet_type: 'parfume', is_active: true }); }}>
               Batal
             </button>
           )}
