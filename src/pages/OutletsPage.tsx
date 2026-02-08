@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
-import type { Outlet } from '@/types/database'
+import type { Outlet, OutletType } from '@/types/database'
+
+const OUTLET_TYPE_OPTIONS: { value: OutletType; label: string }[] = [
+  { value: 'parfume', label: 'Parfume' },
+  { value: 'barbershop', label: 'Barbershop' },
+]
 
 export function OutletsPage() {
   const { profile } = useAuthContext()
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Outlet | null>(null)
-  const [form, setForm] = useState({ name: '', code: '', address: '', is_active: true })
+  const [form, setForm] = useState({ name: '', code: '', address: '', outlet_type: 'parfume' as OutletType, is_active: true })
 
   const isSuperAdmin = profile?.role === 'super_admin'
 
@@ -30,6 +35,7 @@ export function OutletsPage() {
       name: form.name,
       code: form.code || null,
       address: form.address || null,
+      outlet_type: form.outlet_type,
       is_active: form.is_active,
     }
     if (editing) {
@@ -38,7 +44,7 @@ export function OutletsPage() {
       await supabase.from('outlets').insert(payload)
     }
     setEditing(null)
-    setForm({ name: '', code: '', address: '', is_active: true })
+    setForm({ name: '', code: '', address: '', outlet_type: 'parfume', is_active: true })
     fetchOutlets()
   }
 
@@ -48,6 +54,7 @@ export function OutletsPage() {
       name: o.name,
       code: o.code ?? '',
       address: o.address ?? '',
+      outlet_type: o.outlet_type ?? 'parfume',
       is_active: o.is_active,
     })
   }
@@ -86,6 +93,15 @@ export function OutletsPage() {
           <label className="block text-sm font-medium mb-1">Alamat</label>
           <input type="text" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="input" />
         </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Tipe outlet</label>
+          <select value={form.outlet_type} onChange={(e) => setForm((f) => ({ ...f, outlet_type: e.target.value as OutletType }))} className="input">
+            {OUTLET_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Barbershop: wajib pilih barber di POS; penjualan tercatat ke barber</p>
+        </div>
         <div className="flex items-center gap-2">
           <input type="checkbox" id="is_active" checked={form.is_active} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
           <label htmlFor="is_active">Aktif</label>
@@ -106,6 +122,7 @@ export function OutletsPage() {
             <tr className="border-b border-gray-200 dark:border-gray-600">
               <th className="text-left py-2">Nama</th>
               <th className="text-left py-2">Kode</th>
+              <th className="text-left py-2">Tipe</th>
               <th className="text-left py-2">Alamat</th>
               <th className="py-2">Status</th>
               <th className="w-32">Aksi</th>
@@ -116,6 +133,7 @@ export function OutletsPage() {
               <tr key={o.id} className="border-b border-gray-100 dark:border-gray-700">
                 <td className="py-2 font-medium">{o.name}</td>
                 <td className="py-2">{o.code ?? '-'}</td>
+                <td className="py-2">{o.outlet_type === 'barbershop' ? 'Barbershop' : 'Parfume'}</td>
                 <td className="py-2 text-gray-600 dark:text-gray-400">{o.address ?? '-'}</td>
                 <td className="py-2">{o.is_active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="py-2">

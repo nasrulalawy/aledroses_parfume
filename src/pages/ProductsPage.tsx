@@ -13,7 +13,7 @@ export function ProductsPage() {
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const formCardRef = useRef<HTMLFormElement>(null)
   const [form, setForm] = useState({
-    sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_active: true,
+    sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_service: false, is_active: true,
   })
 
   useEffect(() => {
@@ -44,8 +44,9 @@ export function ProductsPage() {
       category_id: form.category_id,
       unit: form.unit,
       price: Number(form.price),
-      cost: form.cost ? Number(form.cost) : null,
-      stock: Number(form.stock),
+      cost: form.is_service ? null : (form.cost ? Number(form.cost) : null),
+      stock: form.is_service ? 0 : Number(form.stock),
+      is_service: form.is_service,
       is_active: form.is_active,
     }
     if (editing) {
@@ -54,7 +55,7 @@ export function ProductsPage() {
       await supabase.from('products').insert(payload)
     }
     setEditing(null)
-    setForm({ sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_active: true })
+    setForm({ sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_service: false, is_active: true })
     fetchProducts()
   }
 
@@ -62,7 +63,7 @@ export function ProductsPage() {
     setEditing(p)
     setForm({
       sku: p.sku, name: p.name, category_id: p.category_id, unit: p.unit,
-      price: p.price, cost: p.cost ?? 0, stock: p.stock, is_active: p.is_active,
+      price: p.price, cost: p.cost ?? 0, stock: p.stock, is_service: p.is_service ?? false, is_active: p.is_active,
     })
     formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current)
@@ -118,14 +119,22 @@ export function ProductsPage() {
           <label className="block text-sm font-medium mb-1">Harga jual</label>
           <input type="number" min={0} step={0.01} value={form.price || ''} onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) || 0 }))} className="input" required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">HPP (Harga Pokok Penjualan)</label>
-          <input type="number" min={0} step={0.01} value={form.cost || ''} onChange={(e) => setForm((f) => ({ ...f, cost: Number(e.target.value) || 0 }))} className="input" placeholder="Dasar perhitungan keuntungan" />
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Dasar perhitungan keuntungan per unit</p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Stok</label>
-          <input type="number" min={0} value={form.stock} onChange={(e) => setForm((f) => ({ ...f, stock: Number(e.target.value) || 0 }))} className="input" />
+        {!form.is_service && (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1">HPP (Harga Pokok Penjualan)</label>
+              <input type="number" min={0} step={0.01} value={form.cost || ''} onChange={(e) => setForm((f) => ({ ...f, cost: Number(e.target.value) || 0 }))} className="input" placeholder="Dasar perhitungan keuntungan" />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Dasar perhitungan keuntungan per unit</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Stok</label>
+              <input type="number" min={0} value={form.stock} onChange={(e) => setForm((f) => ({ ...f, stock: Number(e.target.value) || 0 }))} className="input" />
+            </div>
+          </>
+        )}
+        <div className="flex items-center gap-2">
+          <input type="checkbox" id="is_service" checked={form.is_service} onChange={(e) => setForm((f) => ({ ...f, is_service: e.target.checked }))} />
+          <label htmlFor="is_service">Produk jasa (tanpa stok &amp; HPP)</label>
         </div>
         <div className="flex items-center gap-2">
           <input type="checkbox" id="is_active" checked={form.is_active} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
@@ -143,6 +152,7 @@ export function ProductsPage() {
               <th className="text-left py-2">SKU</th>
               <th className="text-left py-2">Nama</th>
               <th className="text-left py-2">Kategori</th>
+              <th className="text-center py-2">Tipe</th>
               <th className="text-right py-2">Harga jual</th>
               <th className="text-right py-2">HPP</th>
               <th className="text-right py-2">Stok</th>
@@ -155,9 +165,10 @@ export function ProductsPage() {
                 <td className="py-2">{p.sku}</td>
                 <td className="py-2">{p.name}</td>
                 <td className="py-2">{categories.find((c) => c.id === p.category_id)?.name ?? '-'}</td>
+                <td className="py-2 text-center">{p.is_service ? 'Jasa' : 'Barang'}</td>
                 <td className="py-2 text-right">Rp {Number(p.price).toLocaleString('id-ID')}</td>
-                <td className="py-2 text-right">{p.cost != null ? `Rp ${Number(p.cost).toLocaleString('id-ID')}` : '-'}</td>
-                <td className="py-2 text-right">{p.stock}</td>
+                <td className="py-2 text-right">{p.is_service ? '-' : (p.cost != null ? `Rp ${Number(p.cost).toLocaleString('id-ID')}` : '-')}</td>
+                <td className="py-2 text-right">{p.is_service ? '-' : p.stock}</td>
                 <td className="py-2">
                   <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(p)}>Edit</button>
                   <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(p.id)}>Hapus</button>

@@ -4,14 +4,16 @@ import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
 import { usePOSStore } from '@/stores/posStore'
-import type { Product, Category } from '@/types/database'
+import type { Product, Category, Employee } from '@/types/database'
 
 export function POSPage() {
   const { profile } = useAuthContext()
-  const { outletId } = useOutlet()
+  const { outletId, outlet } = useOutlet()
   const { cart, globalDiscount, taxRate, addItem, removeItem, updateQty, setGlobalDiscount, setTaxRate, clearCart, getItemsSubtotal, getSubtotal, getTotal } = usePOSStore()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [barbers, setBarbers] = useState<Employee[]>([])
+  const [selectedBarberId, setSelectedBarberId] = useState<string>('')
   const [filterCat, setFilterCat] = useState<string>('')
   const [search, setSearch] = useState('')
   const [payModal, setPayModal] = useState(false)
@@ -20,15 +22,23 @@ export function POSPage() {
   const [processing, setProcessing] = useState(false)
   const [currentShiftId, setCurrentShiftId] = useState<string | null>(null)
 
+  const isBarbershop = outlet?.outlet_type === 'barbershop'
+
   useEffect(() => {
     if (!outletId) return
     supabase.from('categories').select('*').eq('outlet_id', outletId).order('name').then(({ data }) => setCategories((data as Category[]) ?? []))
     supabase.from('products').select('*').eq('outlet_id', outletId).eq('is_active', true).order('name').then(({ data }) => setProducts((data as Product[]) ?? []))
+    if (isBarbershop) {
+      supabase.from('employees').select('*').eq('outlet_id', outletId).eq('employee_type', 'barber').eq('is_active', true).order('nama').then(({ data }) => setBarbers((data as Employee[]) ?? []))
+    } else {
+      setBarbers([])
+      setSelectedBarberId('')
+    }
     if (profile?.employee_id) {
       const today = new Date().toISOString().slice(0, 10)
       supabase.from('shifts').select('id').eq('employee_id', profile.employee_id).eq('date', today).eq('status', 'open').maybeSingle().then(({ data }) => setCurrentShiftId(data?.id ?? null))
     }
-  }, [outletId, profile?.employee_id])
+  }, [outletId, profile?.employee_id, isBarbershop])
 
   const filtered = products.filter((p) => (filterCat ? p.category_id === filterCat : true) && (search ? p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()) : true))
 
@@ -67,6 +77,10 @@ export function POSPage() {
       alert('Uang diterima kurang dari total.')
       return
     }
+    if (isBarbershop && !selectedBarberId) {
+      alert('Pilih barber terlebih dahulu.')
+      return
+    }
     setProcessing(true)
     const transactionNumber = await generateTransactionNumber()
     const itemsSubtotal = getItemsSubtotal()
@@ -89,6 +103,7 @@ export function POSPage() {
           outlet_id: outletId,
           transaction_number: transactionNumber,
           employee_id: profile.employee_id,
+          barber_id: isBarbershop ? selectedBarberId : null,
           shift_id: currentShiftId,
           subtotal: itemsSubtotal,
           discount: globalDiscount,
@@ -140,8 +155,9 @@ export function POSPage() {
         }
       }
 
-      // 4. Kurangi stok produk (pakai RPC SECURITY DEFINER agar kasir tidak kena RLS)
+      // 4. Kurangi stok produk (hanya barang; produk jasa tidak punya stok)
       for (const c of cart) {
+        if (c.product.is_service) continue
         const { error: stockErr } = await supabase.rpc('decrement_stock', {
           p_id: c.product.id,
           q: c.qty,
@@ -154,6 +170,7 @@ export function POSPage() {
       clearCart()
       setPayModal(false)
       setCashReceived('')
+      if (isBarbershop) setSelectedBarberId('')
       alert(`Transaksi ${transactionNumber} berhasil.`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Gagal menyimpan transaksi'
@@ -217,6 +234,23 @@ export function POSPage() {
           </div>
         </div>
         <div className="card">
+          {isBarbershop && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1">Barber <span className="text-red-600">*</span></label>
+              <select
+                value={selectedBarberId}
+                onChange={(e) => setSelectedBarberId(e.target.value)}
+                className="input w-full"
+                required
+              >
+                <option value="">Pilih barber</option>
+                {barbers.map((b) => (
+                  <option key={b.id} value={b.id}>{b.nama}</option>
+                ))}
+              </select>
+              {barbers.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Belum ada barber. Tambah di menu Karyawan → Tipe: Barber.</p>}
+            </div>
+          )}
           <h3 className="font-semibold mb-2">Keranjang</h3>
           <div className="space-y-2 max-h-[300px] overflow-y-auto">
             {cart.map((c) => (
@@ -260,10 +294,10 @@ export function POSPage() {
             type="button"
             className="btn-primary w-full mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => setPayModal(true)}
-            disabled={cart.length === 0 || !canTransact}
-            title={!canTransact ? 'Buka shift terlebih dahulu' : undefined}
+            disabled={cart.length === 0 || !canTransact || (isBarbershop && !selectedBarberId)}
+            title={!canTransact ? 'Buka shift terlebih dahulu' : isBarbershop && !selectedBarberId ? 'Pilih barber terlebih dahulu' : undefined}
           >
-            {!canTransact ? 'Buka shift dulu' : 'Bayar'}
+            {!canTransact ? 'Buka shift dulu' : isBarbershop && !selectedBarberId ? 'Pilih barber' : 'Bayar'}
           </button>
         </div>
       </div>

@@ -1,12 +1,329 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
-import type { Employee } from '@/types/database'
+import type { Employee, CompensationType, EmployeeType } from '@/types/database'
+import type { Attendance } from '@/types/database'
+
+type TxnItemRow = {
+  product_id: string
+  qty: number
+  unit_price: number
+  discount: number
+  total: number
+  products?: { id: string; name: string; sku: string; cost: number | null } | null
+}
+
+type TxnRow = {
+  id: string
+  created_at: string
+  subtotal: number
+  discount: number
+  tax: number
+  transaction_items?: TxnItemRow[] | null
+}
+
+function BarberDetailModal({
+  employee,
+  outletId,
+  onClose,
+}: {
+  employee: Employee
+  outletId: string
+  onClose: () => void
+}) {
+  const [period, setPeriod] = useState<'day' | 'month' | 'year'>('month')
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [year, setYear] = useState(new Date().getFullYear().toString())
+  const [attPeriod, setAttPeriod] = useState<'day' | 'month'>('month')
+  const [attDate, setAttDate] = useState(new Date().toISOString().slice(0, 10))
+  const [attMonth, setAttMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [loading, setLoading] = useState(true)
+  const [txns, setTxns] = useState<TxnRow[]>([])
+  const [attendances, setAttendances] = useState<Attendance[]>([])
+
+  const txnSelect = 'id, created_at, subtotal, discount, tax, transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, cost))'
+
+  useEffect(() => {
+    if (!outletId || !employee.id) return
+    setLoading(true)
+    const start = period === 'day' ? `${date}T00:00:00` : period === 'month' ? `${month}-01T00:00:00` : `${year}-01-01T00:00:00`
+    const end =
+      period === 'day'
+        ? `${date}T23:59:59`
+        : period === 'month'
+          ? `${month}-${String(new Date(parseInt(month.slice(0, 4), 10), parseInt(month.slice(5, 7), 10), 0).getDate()).padStart(2, '0')}T23:59:59`
+          : `${year}-12-31T23:59:59`
+    supabase
+      .from('transactions')
+      .select(txnSelect)
+      .eq('outlet_id', outletId)
+      .eq('barber_id', employee.id)
+      .eq('status', 'completed')
+      .gte('created_at', start)
+      .lte('created_at', end)
+      .order('created_at', { ascending: true })
+      .limit(5000)
+      .then(({ data }) => {
+        setTxns((data as TxnRow[]) ?? [])
+      })
+      .finally(() => setLoading(false))
+  }, [outletId, employee.id, period, date, month, year])
+
+  useEffect(() => {
+    if (!employee.id) return
+    if (attPeriod === 'day') {
+      supabase
+        .from('attendances')
+        .select('*')
+        .eq('employee_id', employee.id)
+        .eq('date', attDate)
+        .order('check_in')
+        .then(({ data }) => setAttendances((data as Attendance[]) ?? []))
+    } else {
+      supabase
+        .from('attendances')
+        .select('*')
+        .eq('employee_id', employee.id)
+        .gte('date', `${attMonth}-01`)
+        .lt('date', `${attMonth}-32`)
+        .order('date', { ascending: false })
+        .then(({ data }) => setAttendances((data as Attendance[]) ?? []))
+    }
+  }, [employee.id, attPeriod, attDate, attMonth])
+
+  const getBersihTotal = (t: TxnRow) => Number(t.subtotal ?? 0) - Number(t.discount ?? 0) + Number(t.tax ?? 0)
+  const getTotalCost = (t: TxnRow) =>
+    (t.transaction_items ?? []).reduce((sum, it) => sum + (Number(it.products?.cost ?? 0) * Number(it.qty)), 0)
+
+  const totals = useMemo(() => {
+    const total = txns.reduce((s, t) => s + getBersihTotal(t), 0)
+    const totalCost = txns.reduce((s, t) => s + getTotalCost(t), 0)
+    const profit = total - totalCost
+    const pct = employee.profit_share_percent ?? 0
+    const bagiHasil = pct ? (profit * pct) / 100 : 0
+    return { total, totalCost, profit, bagiHasil, count: txns.length }
+  }, [txns, employee.profit_share_percent])
+
+  const grouped = useMemo(() => {
+    if (period === 'day') return []
+    const byKey: Record<string, { total: number; totalCost: number; count: number }> = {}
+    for (const t of txns) {
+      const key = period === 'month' ? t.created_at.slice(0, 10) : t.created_at.slice(0, 7)
+      if (!byKey[key]) byKey[key] = { total: 0, totalCost: 0, count: 0 }
+      byKey[key].total += getBersihTotal(t)
+      byKey[key].totalCost += getTotalCost(t)
+      byKey[key].count += 1
+    }
+    return Object.entries(byKey)
+      .map(([k, v]) => ({ key: k, ...v, profit: v.total - v.totalCost }))
+      .sort((a, b) => a.key.localeCompare(b.key))
+  }, [txns, period])
+
+  const productBreakdown = useMemo(() => {
+    const map: Record<string, { name: string; sku: string; qty: number; total: number }> = {}
+    for (const t of txns) {
+      for (const it of t.transaction_items ?? []) {
+        const id = it.product_id
+        if (!map[id]) map[id] = { name: it.products?.name ?? '-', sku: it.products?.sku ?? '-', qty: 0, total: 0 }
+        map[id].qty += Number(it.qty)
+        map[id].total += Number(it.total)
+      }
+    }
+    return Object.entries(map)
+      .map(([id, v]) => ({ product_id: id, ...v }))
+      .sort((a, b) => b.total - a.total)
+  }, [txns])
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="card max-w-4xl w-full my-8 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-start">
+          <h3 className="font-semibold text-xl">Detail Barber: {employee.nama}</h3>
+          <button type="button" className="btn-secondary text-sm" onClick={onClose}>
+            Tutup
+          </button>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          Bagi hasil: {employee.profit_share_percent != null ? `${employee.profit_share_percent}%` : '-'}
+        </p>
+
+        {/* Laporan Pendapatan */}
+        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+          <h4 className="font-semibold text-lg mb-3">Laporan Pendapatan</h4>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button type="button" className={period === 'day' ? 'btn-primary' : 'btn-secondary'} onClick={() => setPeriod('day')}>
+              Harian
+            </button>
+            <button type="button" className={period === 'month' ? 'btn-primary' : 'btn-secondary'} onClick={() => setPeriod('month')}>
+              Bulanan
+            </button>
+            <button type="button" className={period === 'year' ? 'btn-primary' : 'btn-secondary'} onClick={() => setPeriod('year')}>
+              Tahunan
+            </button>
+            {period === 'day' && <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input w-40" />}
+            {period === 'month' && <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="input w-40" />}
+            {period === 'year' && <input type="number" min={2020} max={2030} value={year} onChange={(e) => setYear(e.target.value)} className="input w-24" />}
+          </div>
+          {loading ? (
+            <p className="text-gray-500">Memuat...</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                <div className="card">
+                  <p className="text-xs text-gray-500">Total penjualan</p>
+                  <p className="font-bold text-primary-600">Rp {totals.total.toLocaleString('id-ID')}</p>
+                </div>
+                <div className="card">
+                  <p className="text-xs text-gray-500">Keuntungan</p>
+                  <p className={`font-bold ${totals.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Rp {totals.profit.toLocaleString('id-ID')}</p>
+                </div>
+                <div className="card border-l-4 border-l-primary-500">
+                  <p className="text-xs text-gray-500">Total bagi hasil</p>
+                  <p className="font-bold text-primary-600">Rp {totals.bagiHasil.toLocaleString('id-ID')}</p>
+                </div>
+                <div className="card">
+                  <p className="text-xs text-gray-500">Transaksi</p>
+                  <p className="font-bold">{totals.count}</p>
+                </div>
+              </div>
+              {grouped.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2">{period === 'month' ? 'Tanggal' : 'Bulan'}</th>
+                        <th className="text-right py-2">Transaksi</th>
+                        <th className="text-right py-2">Penjualan</th>
+                        <th className="text-right py-2">Keuntungan</th>
+                        <th className="text-right py-2">Bagi hasil</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.map((g) => {
+                        const pct = employee.profit_share_percent ?? 0
+                        const share = pct ? (g.profit * pct) / 100 : 0
+                        return (
+                          <tr key={g.key} className="border-b">
+                            <td className="py-2">{g.key}</td>
+                            <td className="py-2 text-right">{g.count}</td>
+                            <td className="py-2 text-right">Rp {g.total.toLocaleString('id-ID')}</td>
+                            <td className={`py-2 text-right ${g.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Rp {g.profit.toLocaleString('id-ID')}</td>
+                            <td className="py-2 text-right text-primary-600">Rp {share.toLocaleString('id-ID')}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Laporan Absensi */}
+        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+          <h4 className="font-semibold text-lg mb-3">Laporan Absensi</h4>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button type="button" className={attPeriod === 'day' ? 'btn-primary' : 'btn-secondary'} onClick={() => setAttPeriod('day')}>
+              Per Hari
+            </button>
+            <button type="button" className={attPeriod === 'month' ? 'btn-primary' : 'btn-secondary'} onClick={() => setAttPeriod('month')}>
+              Per Bulan
+            </button>
+            {attPeriod === 'day' && <input type="date" value={attDate} onChange={(e) => setAttDate(e.target.value)} className="input w-40" />}
+            {attPeriod === 'month' && <input type="month" value={attMonth} onChange={(e) => setAttMonth(e.target.value)} className="input w-40" />}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2">Tanggal</th>
+                  <th className="text-left py-2">Check-in</th>
+                  <th className="text-left py-2">Check-out</th>
+                  <th className="text-left py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendances.map((a) => (
+                  <tr key={a.id} className="border-b">
+                    <td className="py-2">{a.date}</td>
+                    <td className="py-2">{a.check_in ? new Date(a.check_in).toLocaleTimeString('id-ID') : '-'}</td>
+                    <td className="py-2">{a.check_out ? new Date(a.check_out).toLocaleTimeString('id-ID') : '-'}</td>
+                    <td className="py-2 capitalize">{a.status}</td>
+                  </tr>
+                ))}
+                {attendances.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-4 text-center text-gray-500">
+                      Tidak ada data absensi
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Rincian Produk Terjual */}
+        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+          <h4 className="font-semibold text-lg mb-3">Rincian Produk Terjual</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2">Produk</th>
+                  <th className="text-left py-2">SKU</th>
+                  <th className="text-right py-2">Qty</th>
+                  <th className="text-right py-2">Total (Rp)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productBreakdown.map((p) => (
+                  <tr key={p.product_id} className="border-b">
+                    <td className="py-2 font-medium">{p.name}</td>
+                    <td className="py-2 text-gray-600 dark:text-gray-400">{p.sku}</td>
+                    <td className="py-2 text-right tabular-nums">{p.qty}</td>
+                    <td className="py-2 text-right tabular-nums">Rp {p.total.toLocaleString('id-ID')}</td>
+                  </tr>
+                ))}
+                {productBreakdown.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={4} className="py-4 text-center text-gray-500">
+                      Belum ada produk terjual
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const COMPENSATION_OPTIONS: { value: CompensationType; label: string }[] = [
+  { value: 'gaji', label: 'Gaji' },
+  { value: 'bagi_hasil', label: 'Bagi hasil' },
+]
+
+const EMPLOYEE_TYPE_OPTIONS: { value: EmployeeType; label: string }[] = [
+  { value: 'staff', label: 'Staff (Kasir/Manager)' },
+  { value: 'barber', label: 'Barber' },
+]
 
 const JABATAN_OPTIONS: { value: string; label: string }[] = [
   { value: 'Manager', label: 'Manager' },
   { value: 'Kasir', label: 'Kasir' },
+  { value: 'Barber', label: 'Barber' },
 ]
 
 export function EmployeesPage() {
@@ -15,16 +332,22 @@ export function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Employee | null>(null)
-  const [form, setForm] = useState({ outlet_id: '' as string, nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '' as number | '', is_active: true })
+  const [form, setForm] = useState({ outlet_id: '' as string, nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '' as number | '', compensation_type: 'gaji' as CompensationType, profit_share_percent: '' as number | '', employee_type: 'staff' as EmployeeType, is_active: true })
   const [accountModal, setAccountModal] = useState<Employee | null>(null)
   const [accountForm, setAccountForm] = useState({ email: '', password: '', confirmPassword: '' })
   const [accountSubmitting, setAccountSubmitting] = useState(false)
   const [accountError, setAccountError] = useState('')
+  const [detailModal, setDetailModal] = useState<Employee | null>(null)
   const canEdit = profile?.role === 'super_admin' || profile?.role === 'manager'
   const effectiveOutletId = isSuperAdmin ? (form.outlet_id || outletId) : outletId
 
   useEffect(() => {
-    if (!effectiveOutletId) return
+    if (!effectiveOutletId) {
+      setEmployees([])
+      setLoading(false)
+      return
+    }
+    setLoading(true)
     fetchEmployees()
   }, [effectiveOutletId])
 
@@ -48,6 +371,9 @@ export function EmployeesPage() {
       alamat: form.alamat || null,
       jabatan: form.jabatan || null,
       gaji: form.gaji !== '' ? Number(form.gaji) : null,
+      compensation_type: form.compensation_type,
+      profit_share_percent: form.compensation_type === 'bagi_hasil' && form.profit_share_percent !== '' ? Number(form.profit_share_percent) : null,
+      employee_type: form.employee_type,
       is_active: form.is_active,
       profile_id: null,
     }
@@ -60,13 +386,16 @@ export function EmployeesPage() {
         alamat: payload.alamat,
         jabatan: payload.jabatan,
         gaji: payload.gaji,
+        compensation_type: payload.compensation_type,
+        profit_share_percent: payload.profit_share_percent,
+        employee_type: payload.employee_type,
         is_active: payload.is_active,
       }).eq('id', editing.id)
     } else {
       await supabase.from('employees').insert(payload)
     }
     setEditing(null)
-    setForm({ outlet_id: (isSuperAdmin ? outletId : outletId) ?? '', nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '', is_active: true })
+    setForm({ outlet_id: (isSuperAdmin ? outletId : outletId) ?? '', nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '', compensation_type: 'gaji', profit_share_percent: '', employee_type: 'staff', is_active: true })
     fetchEmployees()
   }
 
@@ -80,6 +409,9 @@ export function EmployeesPage() {
       alamat: emp.alamat || '',
       jabatan: emp.jabatan || '',
       gaji: emp.gaji ?? '',
+      compensation_type: emp.compensation_type ?? 'gaji',
+      profit_share_percent: emp.profit_share_percent != null ? emp.profit_share_percent : '',
+      employee_type: emp.employee_type ?? 'staff',
       is_active: emp.is_active,
     })
   }
@@ -222,16 +554,41 @@ export function EmployeesPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Gaji</label>
-            <input type="number" min={0} value={form.gaji} onChange={(e) => setForm((f) => ({ ...f, gaji: e.target.value === '' ? '' : Number(e.target.value) }))} className="input" />
+            <label className="block text-sm font-medium mb-1">Tipe karyawan</label>
+            <select value={form.employee_type} onChange={(e) => setForm((f) => ({ ...f, employee_type: e.target.value as EmployeeType }))} className="input">
+              {EMPLOYEE_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Barber: untuk outlet Barbershop, bisa dipilih di POS untuk atribusi penjualan</p>
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Tipe kompensasi</label>
+            <select value={form.compensation_type} onChange={(e) => setForm((f) => ({ ...f, compensation_type: e.target.value as CompensationType }))} className="input">
+              {COMPENSATION_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Gaji</label>
+            <input type="number" min={0} value={form.gaji} onChange={(e) => setForm((f) => ({ ...f, gaji: e.target.value === '' ? '' : Number(e.target.value) }))} className="input" placeholder={form.compensation_type === 'bagi_hasil' ? 'Opsional' : ''} />
+            {form.compensation_type === 'bagi_hasil' && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Untuk bagi hasil, isi jika ada dasar/insentif tambahan</p>}
+          </div>
+          {form.compensation_type === 'bagi_hasil' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Persentase bagi hasil (%)</label>
+              <input type="number" min={0} max={100} step={0.5} value={form.profit_share_percent} onChange={(e) => setForm((f) => ({ ...f, profit_share_percent: e.target.value === '' ? '' : Number(e.target.value) }))} className="input" placeholder="Contoh: 30" />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Persen dari keuntungan penjualan (profit) yang menjadi hak karyawan</p>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <input type="checkbox" id="is_active" checked={form.is_active} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
             <label htmlFor="is_active">Aktif</label>
           </div>
           <div className="flex gap-2">
             <button type="submit" className="btn-primary">{editing ? 'Simpan' : 'Tambah'}</button>
-            {editing && <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm({ outlet_id: outletId ?? '', nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '', is_active: true }); }}>Batal</button>}
+            {editing && <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm({ outlet_id: outletId ?? '', nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '', compensation_type: 'gaji', profit_share_percent: '', employee_type: 'staff', is_active: true }); }}>Batal</button>}
           </div>
         </form>
       )}
@@ -241,11 +598,14 @@ export function EmployeesPage() {
             <tr className="border-b border-gray-200 dark:border-gray-600">
               <th className="text-left py-2">NIP</th>
               <th className="text-left py-2">Nama</th>
+              <th className="text-left py-2">Tipe</th>
               <th className="text-left py-2">Jabatan</th>
+              <th className="text-left py-2">Kompensasi</th>
+              <th className="text-right py-2">Bagi hasil %</th>
               <th className="text-right py-2">Gaji</th>
               <th className="py-2">Status</th>
               <th className="py-2">Akun</th>
-              {canEdit && <th className="w-32">Aksi</th>}
+              <th className="w-40">Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -253,25 +613,42 @@ export function EmployeesPage() {
               <tr key={e.id} className="border-b border-gray-100 dark:border-gray-700">
                 <td className="py-2">{e.nip}</td>
                 <td className="py-2">{e.nama}</td>
+                <td className="py-2">{e.employee_type === 'barber' ? 'Barber' : 'Staff'}</td>
                 <td className="py-2">{e.jabatan || '-'}</td>
+                <td className="py-2">{e.compensation_type === 'bagi_hasil' ? 'Bagi hasil' : 'Gaji'}</td>
+                <td className="py-2 text-right">{e.compensation_type === 'bagi_hasil' && e.profit_share_percent != null ? `${Number(e.profit_share_percent)}%` : '-'}</td>
                 <td className="py-2 text-right">{e.gaji != null ? `Rp ${Number(e.gaji).toLocaleString('id-ID')}` : '-'}</td>
                 <td className="py-2">{e.is_active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="py-2">{e.profile_id ? 'Sudah punya akun' : '-'}</td>
-                {canEdit && (
-                  <td className="py-2">
-                    {canCreateAccount(e) && (
-                      <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => { setAccountModal(e); setAccountForm({ email: '', password: '', confirmPassword: '' }); setAccountError(''); }}>Buat Akun</button>
-                    )}
-                    <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(e)}>Edit</button>
-                    <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(e.id)}>Hapus</button>
-                  </td>
-                )}
+                <td className="py-2">
+                  {e.employee_type === 'barber' && (
+                    <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => setDetailModal(e)}>
+                      Detail
+                    </button>
+                  )}
+                  {canEdit && (
+                    <>
+                      {canCreateAccount(e) && (
+                        <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => { setAccountModal(e); setAccountForm({ email: '', password: '', confirmPassword: '' }); setAccountError(''); }}>Buat Akun</button>
+                      )}
+                      <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(e)}>Edit</button>
+                      <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(e.id)}>Hapus</button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
+      {detailModal && effectiveOutletId && (
+        <BarberDetailModal
+          employee={detailModal}
+          outletId={effectiveOutletId}
+          onClose={() => setDetailModal(null)}
+        />
+      )}
       {accountModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="card max-w-md w-full">

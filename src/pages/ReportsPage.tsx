@@ -33,17 +33,20 @@ type TxnRow = {
   total: number
   cash_received: number | null
   change: number | null
+  barber_id: string | null
   employees?: { nama: string } | null
   transaction_items?: TxnItemRow[] | null
 }
 
 type CategoryOption = { id: string; name: string }
 type ProductOption = { id: string; name: string; sku: string; category_id: string }
+type BarberOption = { id: string; nama: string; profit_share_percent?: number | null }
 
 export function ReportsPage() {
   const { profile } = useAuthContext()
-  const { outletId, isSuperAdmin } = useOutlet()
+  const { outletId, outlet, isSuperAdmin } = useOutlet()
   const isKasir = profile?.role === 'karyawan'
+  const isBarbershop = outlet?.outlet_type === 'barbershop'
   const [period, setPeriod] = useState<ReportPeriod>('day')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
@@ -53,8 +56,10 @@ export function ReportsPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [categories, setCategories] = useState<CategoryOption[]>([])
   const [products, setProducts] = useState<ProductOption[]>([])
+  const [barbers, setBarbers] = useState<BarberOption[]>([])
   const [filterCategoryId, setFilterCategoryId] = useState('')
   const [filterProductId, setFilterProductId] = useState('')
+  const [filterBarberId, setFilterBarberId] = useState('')
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<'' | 'cash' | 'transfer' | 'qris' | 'other'>('')
 
   useEffect(() => {
@@ -71,7 +76,20 @@ export function ReportsPage() {
       .eq('outlet_id', outletId)
       .order('name')
       .then(({ data }) => setProducts((data as ProductOption[]) ?? []))
-  }, [outletId])
+    if (isBarbershop) {
+      supabase
+        .from('employees')
+        .select('id, nama, profit_share_percent')
+        .eq('outlet_id', outletId)
+        .eq('employee_type', 'barber')
+        .eq('is_active', true)
+        .order('nama')
+        .then(({ data }) => setBarbers((data as BarberOption[]) ?? []))
+    } else {
+      setBarbers([])
+      setFilterBarberId('')
+    }
+  }, [outletId, isBarbershop])
 
   useEffect(() => {
     if (!outletId) return
@@ -82,7 +100,7 @@ export function ReportsPage() {
   }, [outletId, period, date, month, year, filterPaymentMethod, isKasir])
 
   function txnSelect() {
-    return 'id, transaction_number, created_at, payment_method, subtotal, discount, tax, total, cash_received, change, employees(nama), transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, category_id, cost))'
+    return 'id, transaction_number, created_at, payment_method, subtotal, discount, tax, total, cash_received, change, barber_id, employees!transactions_employee_id_fkey(nama), transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, category_id, cost))'
   }
 
   async function fetchDaily() {
@@ -159,8 +177,11 @@ export function ReportsPage() {
     if (filterProductId) {
       list = list.filter((t) => t.transaction_items?.some((it) => it.product_id === filterProductId))
     }
+    if (filterBarberId) {
+      list = list.filter((t) => t.barber_id === filterBarberId)
+    }
     return list
-  }, [txns, filterCategoryId, filterProductId])
+  }, [txns, filterCategoryId, filterProductId, filterBarberId])
 
   /** Total bersih = Subtotal - Diskon + Pajak (yang dibayar, jangan ikut nominal subtotal) */
   const getBersihTotal = (t: TxnRow) =>
@@ -285,6 +306,21 @@ export function ReportsPage() {
               ))}
             </select>
           </label>
+          {isBarbershop && (
+            <label className="flex items-center gap-2">
+              <span className="text-sm text-gray-600 dark:text-gray-400">Barber</span>
+              <select
+                value={filterBarberId}
+                onChange={(e) => setFilterBarberId(e.target.value)}
+                className="input w-48 min-w-0"
+              >
+                <option value="">Semua barber</option>
+                {barbers.map((b) => (
+                  <option key={b.id} value={b.id}>{b.nama}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="flex items-center gap-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Metode bayar</span>
             <select
@@ -297,13 +333,14 @@ export function ReportsPage() {
               ))}
             </select>
           </label>
-          {(filterCategoryId || filterProductId || filterPaymentMethod) && (
+          {(filterCategoryId || filterProductId || filterBarberId || filterPaymentMethod) && (
             <button
               type="button"
               className="btn-secondary text-sm"
               onClick={() => {
                 setFilterCategoryId('')
                 setFilterProductId('')
+                setFilterBarberId('')
                 setFilterPaymentMethod('')
               }}
             >
@@ -406,6 +443,70 @@ export function ReportsPage() {
             </div>
           )}
 
+          {isBarbershop && filteredTxns.length > 0 && (
+            <div className="card mt-4">
+              <h3 className="font-semibold text-lg mb-3">Rekap per Barber (bagi hasil)</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-600">
+                      <th className="text-left py-2">Barber</th>
+                      <th className="text-right py-2">% Bagi hasil</th>
+                      <th className="text-right py-2">Transaksi</th>
+                      <th className="text-right py-2">Total penjualan</th>
+                      <th className="text-right py-2">Total HPP</th>
+                      <th className="text-right py-2">Keuntungan</th>
+                      <th className="text-right py-2">Bagi hasil (Rp)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const byBarber: Record<string, { total: number; totalCost: number; count: number }> = {}
+                      for (const t of filteredTxns) {
+                        const bid = t.barber_id ?? '_tanpa_barber'
+                        if (!byBarber[bid]) byBarber[bid] = { total: 0, totalCost: 0, count: 0 }
+                        byBarber[bid].total += getBersihTotal(t)
+                        byBarber[bid].totalCost += getTotalCost(t)
+                        byBarber[bid].count += 1
+                      }
+                      return Object.entries(byBarber)
+                        .map(([bid, v]) => {
+                          const barber = bid === '_tanpa_barber' ? null : barbers.find((b) => b.id === bid)
+                          const profit = v.total - v.totalCost
+                          const pct = barber?.profit_share_percent ?? 0
+                          const shareAmount = pct ? (profit * pct) / 100 : 0
+                          return {
+                            barberId: bid,
+                            barberName: bid === '_tanpa_barber' ? '(Tanpa barber)' : barber?.nama ?? '-',
+                            profitSharePercent: pct,
+                            shareAmount,
+                            ...v,
+                            profit,
+                          }
+                        })
+                        .sort((a, b) => b.total - a.total)
+                        .map((row) => (
+                          <tr key={row.barberId} className="border-b border-gray-100 dark:border-gray-700">
+                            <td className="py-2 font-medium">{row.barberName}</td>
+                            <td className="py-2 text-right tabular-nums">{row.profitSharePercent ? `${row.profitSharePercent}%` : '-'}</td>
+                            <td className="py-2 text-right tabular-nums">{row.count}</td>
+                            <td className="py-2 text-right tabular-nums">Rp {row.total.toLocaleString('id-ID')}</td>
+                            <td className="py-2 text-right tabular-nums">Rp {row.totalCost.toLocaleString('id-ID')}</td>
+                            <td className={`py-2 text-right font-medium tabular-nums ${row.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                              Rp {row.profit.toLocaleString('id-ID')}
+                            </td>
+                            <td className="py-2 text-right font-medium tabular-nums text-primary-600">
+                              {row.shareAmount ? `Rp ${Math.round(row.shareAmount).toLocaleString('id-ID')}` : '-'}
+                            </td>
+                          </tr>
+                        ))
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="card mt-4 overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
@@ -413,6 +514,7 @@ export function ReportsPage() {
                   <th className="text-left py-3 px-2">No. Transaksi</th>
                   <th className="text-left py-3 px-2">Waktu</th>
                   <th className="text-left py-3 px-2">Kasir</th>
+                  {isBarbershop && <th className="text-left py-3 px-2">Barber</th>}
                   <th className="text-left py-3 px-2">Metode</th>
                   <th className="text-right py-3 px-2">Subtotal</th>
                   <th className="text-right py-3 px-2">Diskon</th>
@@ -428,6 +530,7 @@ export function ReportsPage() {
                       <td className="py-3 px-2 font-medium">{t.transaction_number}</td>
                       <td className="py-3 px-2 text-gray-700 dark:text-gray-300">{new Date(t.created_at).toLocaleString('id-ID')}</td>
                       <td className="py-3 px-2">{t.employees?.nama ?? '-'}</td>
+                      {isBarbershop && <td className="py-3 px-2">{t.barber_id ? (barbers.find((b) => b.id === t.barber_id)?.nama ?? '-') : '-'}</td>}
                       <td className="py-3 px-2 capitalize">{t.payment_method}</td>
                       <td className="py-3 px-2 text-right tabular-nums">Rp {Number(t.subtotal).toLocaleString('id-ID')}</td>
                       <td className="py-3 px-2 text-right tabular-nums">Rp {Number(t.discount).toLocaleString('id-ID')}</td>
@@ -445,7 +548,7 @@ export function ReportsPage() {
                     </tr>
                     {expanded[t.id] && (
                       <tr key={`${t.id}-detail`} className="bg-gray-50 dark:bg-gray-800/50">
-                        <td colSpan={9} className="p-0">
+                        <td colSpan={isBarbershop ? 10 : 9} className="p-0">
                           <div className="px-4 py-4 border-l-4 border-primary-500">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                               <div>
@@ -496,7 +599,7 @@ export function ReportsPage() {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50">
-                  <td className="py-3 px-2 font-semibold" colSpan={4}>TOTAL</td>
+                  <td className="py-3 px-2 font-semibold" colSpan={isBarbershop ? 5 : 4}>TOTAL</td>
                   <td className="py-3 px-2 text-right font-semibold tabular-nums">Rp {totals.subtotal.toLocaleString('id-ID')}</td>
                   <td className="py-3 px-2 text-right font-semibold tabular-nums">Rp {totals.discount.toLocaleString('id-ID')}</td>
                   <td className="py-3 px-2 text-right font-semibold tabular-nums">Rp {totals.tax.toLocaleString('id-ID')}</td>
@@ -504,7 +607,7 @@ export function ReportsPage() {
                   <td></td>
                 </tr>
                 <tr>
-                  <td className="py-2 px-2 text-sm text-gray-600 dark:text-gray-400" colSpan={9}>
+                  <td className="py-2 px-2 text-sm text-gray-600 dark:text-gray-400" colSpan={isBarbershop ? 10 : 9}>
                     Rekap metode bayar: {Object.entries(totals.byMethod).map(([k, v]) => `${k.toUpperCase()} Rp ${v.toLocaleString('id-ID')}`).join(' · ')}
                   </td>
                 </tr>

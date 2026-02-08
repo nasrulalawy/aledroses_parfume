@@ -29,9 +29,10 @@ export function StockPage() {
   const [error, setError] = useState('')
 
   const filteredProducts = useMemo(() => {
+    const onlyBarang = products.filter((p) => !p.is_service)
     const q = productSearch.trim().toLowerCase()
-    if (!q) return products
-    return products.filter(
+    if (!q) return onlyBarang
+    return onlyBarang.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         (p.sku && p.sku.toLowerCase().includes(q))

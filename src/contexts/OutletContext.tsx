@@ -56,7 +56,7 @@ export function OutletProvider({ children }: { children: ReactNode }) {
       Promise.resolve(
         supabase
           .from('employees')
-          .select('outlet_id, outlets(id, name, code, address, is_active, created_at, updated_at)')
+          .select('outlet_id, outlets(id, name, code, address, outlet_type, is_active, created_at, updated_at)')
           .eq('id', profile.employee_id)
           .single()
       )

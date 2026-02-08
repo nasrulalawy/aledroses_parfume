@@ -1,14 +1,19 @@
 export type Role = 'super_admin' | 'manager' | 'karyawan'
 
+export type OutletType = 'barbershop' | 'parfume'
+
 export interface Outlet {
   id: string
   name: string
   code: string | null
   address: string | null
+  outlet_type?: OutletType
   is_active: boolean
   created_at: string
   updated_at: string
 }
+
+export type EmployeeType = 'barber' | 'staff'
 
 export interface Profile {
   id: string
@@ -20,6 +25,8 @@ export interface Profile {
   updated_at: string
 }
 
+export type CompensationType = 'gaji' | 'bagi_hasil'
+
 export interface Employee {
   id: string
   profile_id: string | null
@@ -30,6 +37,9 @@ export interface Employee {
   alamat: string | null
   jabatan: string | null
   gaji: number | null
+  compensation_type?: CompensationType
+  profit_share_percent?: number | null
+  employee_type?: EmployeeType
   is_active: boolean
   created_at: string
   updated_at: string
@@ -54,6 +64,7 @@ export interface Product {
   price: number
   cost: number | null
   stock: number
+  is_service: boolean
   image_url: string | null
   is_active: boolean
   created_at: string
@@ -81,6 +92,7 @@ export interface Transaction {
   outlet_id: string
   transaction_number: string
   employee_id: string
+  barber_id?: string | null
   shift_id: string | null
   subtotal: number
   discount: number
