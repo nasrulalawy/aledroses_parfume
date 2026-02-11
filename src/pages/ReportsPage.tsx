@@ -212,6 +212,33 @@ export function ReportsPage() {
     return { subtotal, discount, tax, total, totalCost, profit, count: filteredTxns.length, byMethod }
   }, [filteredTxns])
 
+  /** Total penjualan per produk oleh barber terpilih (hanya bermakna saat filter by barber aktif) */
+  const barberProductTotals = useMemo(() => {
+    if (!filterBarberId || filteredTxns.length === 0) return []
+    const byProduct: Record<
+      string,
+      { productId: string; productName: string; sku: string; qty: number; total: number }
+    > = {}
+    for (const t of filteredTxns) {
+      for (const it of t.transaction_items ?? []) {
+        const pid = it.product_id
+        if (!pid) continue
+        if (!byProduct[pid]) {
+          byProduct[pid] = {
+            productId: pid,
+            productName: it.products?.name ?? '-',
+            sku: it.products?.sku ?? '-',
+            qty: 0,
+            total: 0,
+          }
+        }
+        byProduct[pid].qty += Number(it.qty ?? 0)
+        byProduct[pid].total += Number(it.total ?? 0)
+      }
+    }
+    return Object.values(byProduct).sort((a, b) => b.total - a.total)
+  }, [filterBarberId, filteredTxns])
+
   const effectivePeriod = isKasir ? 'day' : period
 
   const grouped = useMemo(() => {
@@ -502,6 +529,50 @@ export function ReportsPage() {
                         ))
                     })()}
                   </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {isBarbershop && filterBarberId && barberProductTotals.length > 0 && (
+            <div className="card mt-4">
+              <h3 className="font-semibold text-lg mb-3">
+                Total penjualan per produk — {barbers.find((b) => b.id === filterBarberId)?.nama ?? 'Barber'}
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-600">
+                      <th className="text-left py-2">Produk</th>
+                      <th className="text-right py-2">Qty terjual</th>
+                      <th className="text-right py-2">Total penjualan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {barberProductTotals.map((row) => (
+                      <tr key={row.productId} className="border-b border-gray-100 dark:border-gray-700">
+                        <td className="py-2">
+                          <span className="font-medium">{row.productName}</span>
+                          <span className="text-gray-500 dark:text-gray-400 ml-1">({row.sku})</span>
+                        </td>
+                        <td className="py-2 text-right tabular-nums">{row.qty.toLocaleString('id-ID')}</td>
+                        <td className="py-2 text-right font-medium tabular-nums">
+                          Rp {row.total.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t font-semibold">
+                      <td className="py-2">Total</td>
+                      <td className="py-2 text-right tabular-nums">
+                        {barberProductTotals.reduce((s, r) => s + r.qty, 0).toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        Rp {barberProductTotals.reduce((s, r) => s + r.total, 0).toLocaleString('id-ID')}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>

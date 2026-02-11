@@ -23,25 +23,53 @@ export function OutletsPage() {
   }, [isSuperAdmin])
 
   async function fetchOutlets() {
-    const { data } = await supabase.from('outlets').select('*').order('name')
-    setOutlets((data as Outlet[]) ?? [])
+    const { data, error } = await supabase
+      .from('outlets')
+      .select('id, name, code, address, outlet_type, is_active, created_at, updated_at')
+      .order('name')
+    if (error?.code === 'PGRST204' || (error?.message && error.message.includes('column'))) {
+      const fallback = await supabase.from('outlets').select('id, name').order('name')
+      const rows = (fallback.data as Record<string, unknown>[]) ?? []
+      setOutlets(rows.map((r) => ({
+        id: r.id as string,
+        name: r.name as string,
+        code: null,
+        address: null,
+        outlet_type: 'parfume',
+        is_active: true,
+        created_at: '',
+        updated_at: '',
+      })))
+    } else {
+      setOutlets((data as Outlet[]) ?? [])
+    }
     setLoading(false)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!isSuperAdmin) return
-    const payload = {
+    const fullPayload = {
       name: form.name,
       code: form.code || null,
       address: form.address || null,
       outlet_type: form.outlet_type,
       is_active: form.is_active,
     }
-    if (editing) {
-      await supabase.from('outlets').update(payload).eq('id', editing.id)
-    } else {
-      await supabase.from('outlets').insert(payload)
+    const minimalPayload = { name: form.name }
+    const tryMutate = async (payload: Record<string, unknown>) => {
+      if (editing) {
+        return supabase.from('outlets').update(payload).eq('id', editing.id)
+      }
+      return supabase.from('outlets').insert(payload)
+    }
+    let result = await tryMutate(fullPayload)
+    if (result.error?.code === 'PGRST204' || (result.error?.message && result.error.message.includes('column'))) {
+      result = await tryMutate(minimalPayload)
+    }
+    if (result.error) {
+      alert(result.error.message || 'Gagal menyimpan outlet')
+      return
     }
     setEditing(null)
     setForm({ name: '', code: '', address: '', outlet_type: 'parfume', is_active: true })

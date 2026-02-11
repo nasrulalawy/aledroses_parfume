@@ -194,10 +194,19 @@ const roleLabels: Record<string, string> = {
 
 export function DashboardLayout() {
   const { profile, signOut } = useAuthContext()
-  const { outletId, outlet, outlets, setOutletId, isSuperAdmin } = useOutlet()
+  const { outletId, outlet, outlets, setOutletId, isSuperAdmin, loading: outletLoading } = useOutlet()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Karyawan/manager: tunggu outlet selesai dimuat dulu, jangan tampilkan layout dengan outlet kosong
+  if (!isSuperAdmin && outletLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="text-gray-600 dark:text-gray-400">Memuat...</div>
+      </div>
+    )
+  }
 
   const pageTitle = useMemo(() => {
     const found = allNavItems.find((i) => i.to === location.pathname)

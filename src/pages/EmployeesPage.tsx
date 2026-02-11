@@ -340,8 +340,14 @@ export function EmployeesPage() {
   const [form, setForm] = useState({ outlet_id: '' as string, nip: '', nama: '', no_telp: '', alamat: '', jabatan: '', gaji: '' as number | '', compensation_type: 'gaji' as CompensationType, profit_share_percent: '' as number | '', employee_type: 'staff' as EmployeeType, is_active: true })
   const [accountModal, setAccountModal] = useState<Employee | null>(null)
   const [accountForm, setAccountForm] = useState({ email: '', password: '', confirmPassword: '' })
+  const [showAccountPassword, setShowAccountPassword] = useState(false)
+  const [showAccountConfirmPassword, setShowAccountConfirmPassword] = useState(false)
   const [accountSubmitting, setAccountSubmitting] = useState(false)
   const [accountError, setAccountError] = useState('')
+  const [linkAccountModal, setLinkAccountModal] = useState<Employee | null>(null)
+  const [linkAccountEmail, setLinkAccountEmail] = useState('')
+  const [linkAccountError, setLinkAccountError] = useState('')
+  const [linkAccountSubmitting, setLinkAccountSubmitting] = useState(false)
   const [detailModal, setDetailModal] = useState<Employee | null>(null)
   const canEdit = profile?.role === 'super_admin' || profile?.role === 'manager'
   const effectiveOutletId = isSuperAdmin ? (form.outlet_id || outletId) : outletId
@@ -358,7 +364,11 @@ export function EmployeesPage() {
 
   async function fetchEmployees() {
     if (!effectiveOutletId) return
-    const { data } = await supabase.from('employees').select('*').eq('outlet_id', effectiveOutletId).order('nama')
+    const { data } = await supabase
+      .from('employees')
+      .select('*')
+      .eq('outlet_id', effectiveOutletId)
+      .order('nama')
     setEmployees((data as Employee[]) ?? [])
     setLoading(false)
   }
@@ -480,24 +490,45 @@ export function EmployeesPage() {
     }
     const newUserId = data?.user?.id
     if (newUserId) {
-      const { error: updateErr } = await supabase
-        .from('employees')
-        .update({ profile_id: newUserId })
-        .eq('id', accountModal.id)
-      if (updateErr) {
-        setAccountSubmitting(false)
-        setAccountError(
-          `Akun user berhasil dibuat, tetapi gagal mengaitkan ke data karyawan: ${updateErr.message}. ` +
-            'Pastikan karyawan ini sudah memiliki Outlet (Edit karyawan → pilih Outlet → Simpan), lalu coba Buat Akun lagi.'
-        )
-        return
-      }
+      // Trigger handle_new_user di DB (migrasi 20240204000020) set employees.profile_id saat user dibuat.
+      // RPC link_employee_profile dipanggil sebagai cadangan.
+      void supabase.rpc('link_employee_profile', {
+        p_employee_id: accountModal.id,
+        p_profile_id: newUserId,
+      })
+      // Langsung update daftar agar kolom Akun tampil "Sudah punya akun"
+      setEmployees((prev) =>
+        prev.map((e) => (e.id === accountModal.id ? { ...e, profile_id: newUserId } : e))
+      )
     }
     setAccountSubmitting(false)
     setAccountModal(null)
     setAccountForm({ email: '', password: '', confirmPassword: '' })
-    fetchEmployees()
+    // Beri waktu sebentar agar trigger/commit di DB selesai sebelum refetch
+    await new Promise((r) => setTimeout(r, 400))
+    await fetchEmployees()
     alert('Akun berhasil dibuat. Jika konfirmasi email diaktifkan, user harus verifikasi email terlebih dahulu.')
+  }
+
+  async function handleLinkAccount(e: React.FormEvent) {
+    e.preventDefault()
+    if (!linkAccountModal) return
+    setLinkAccountError('')
+    setLinkAccountSubmitting(true)
+    const { data, error } = await supabase.rpc('link_employee_profile_by_email', {
+      p_employee_id: linkAccountModal.id,
+      p_email: linkAccountEmail.trim(),
+    })
+    setLinkAccountSubmitting(false)
+    const res = data as { ok?: boolean; error?: string } | null
+    if (error || !res?.ok) {
+      setLinkAccountError(res?.error || error?.message || 'Gagal mengaitkan akun')
+      return
+    }
+    setLinkAccountModal(null)
+    setLinkAccountEmail('')
+    await fetchEmployees()
+    alert('Akun berhasil dikaitkan. User tersebut bisa login dan outlet akan ter-set.')
   }
 
   if (!outletId && !isSuperAdmin) return (
@@ -603,6 +634,7 @@ export function EmployeesPage() {
             <tr className="border-b border-gray-200 dark:border-gray-600">
               <th className="text-left py-2">NIP</th>
               <th className="text-left py-2">Nama</th>
+              <th className="text-left py-2">Outlet</th>
               <th className="text-left py-2">Tipe</th>
               <th className="text-left py-2">Jabatan</th>
               <th className="text-left py-2">Kompensasi</th>
@@ -618,6 +650,7 @@ export function EmployeesPage() {
               <tr key={e.id} className="border-b border-gray-100 dark:border-gray-700">
                 <td className="py-2">{e.nip}</td>
                 <td className="py-2">{e.nama}</td>
+                <td className="py-2">{outlets.find((o) => o.id === e.outlet_id)?.name ?? '-'}</td>
                 <td className="py-2">{e.employee_type === 'barber' ? 'Barber' : 'Staff'}</td>
                 <td className="py-2">{e.jabatan || '-'}</td>
                 <td className="py-2">{e.compensation_type === 'bagi_hasil' ? 'Bagi hasil' : 'Gaji'}</td>
@@ -634,7 +667,10 @@ export function EmployeesPage() {
                   {canEdit && (
                     <>
                       {canCreateAccount(e) && (
-                        <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => { setAccountModal(e); setAccountForm({ email: '', password: '', confirmPassword: '' }); setAccountError(''); }}>Buat Akun</button>
+                        <>
+                          <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => { setAccountModal(e); setAccountForm({ email: '', password: '', confirmPassword: '' }); setAccountError(''); }}>Buat Akun</button>
+                          <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => { setLinkAccountModal(e); setLinkAccountEmail(''); setLinkAccountError(''); }}>Link akun</button>
+                        </>
                       )}
                       <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(e)}>Edit</button>
                       <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(e.id)}>Hapus</button>
@@ -679,30 +715,102 @@ export function EmployeesPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Password</label>
-                <input
-                  type="password"
-                  value={accountForm.password}
-                  onChange={(e) => setAccountForm((f) => ({ ...f, password: e.target.value }))}
-                  className="input w-full"
-                  placeholder="Min. 6 karakter"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showAccountPassword ? 'text' : 'password'}
+                    value={accountForm.password}
+                    onChange={(e) => setAccountForm((f) => ({ ...f, password: e.target.value }))}
+                    className="input w-full pr-10"
+                    placeholder="Min. 6 karakter"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAccountPassword((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    title={showAccountPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                    aria-label={showAccountPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                  >
+                    {showAccountPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Konfirmasi Password</label>
-                <input
-                  type="password"
-                  value={accountForm.confirmPassword}
-                  onChange={(e) => setAccountForm((f) => ({ ...f, confirmPassword: e.target.value }))}
-                  className="input w-full"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showAccountConfirmPassword ? 'text' : 'password'}
+                    value={accountForm.confirmPassword}
+                    onChange={(e) => setAccountForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                    className="input w-full pr-10"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAccountConfirmPassword((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    title={showAccountConfirmPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                    aria-label={showAccountConfirmPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                  >
+                    {showAccountConfirmPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
               {accountError && <p className="text-sm text-red-600">{accountError}</p>}
               <div className="flex gap-2">
                 <button type="button" className="btn-secondary flex-1" onClick={() => { setAccountModal(null); setAccountError(''); }}>Batal</button>
                 <button type="submit" className="btn-primary flex-1" disabled={accountSubmitting}>
                   {accountSubmitting ? 'Memproses...' : 'Buat Akun'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {linkAccountModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="card max-w-md w-full">
+            <h3 className="font-semibold text-lg">Link ke akun yang sudah ada</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Untuk: {linkAccountModal.nama}. Masukkan email login user yang sudah terdaftar. Setelah itu user tersebut login dan outlet akan ter-set.
+            </p>
+            <form onSubmit={handleLinkAccount} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Email login</label>
+                <input
+                  type="email"
+                  value={linkAccountEmail}
+                  onChange={(e) => setLinkAccountEmail(e.target.value)}
+                  className="input w-full"
+                  placeholder="contoh@email.com"
+                  required
+                />
+              </div>
+              {linkAccountError && <p className="text-sm text-red-600">{linkAccountError}</p>}
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary flex-1" onClick={() => { setLinkAccountModal(null); setLinkAccountError(''); }}>Batal</button>
+                <button type="submit" className="btn-primary flex-1" disabled={linkAccountSubmitting}>
+                  {linkAccountSubmitting ? 'Memproses...' : 'Link akun'}
                 </button>
               </div>
             </form>

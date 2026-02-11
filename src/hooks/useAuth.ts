@@ -9,20 +9,34 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const PROFILE_LOAD_TIMEOUT = 6000
+    function loadProfileAndFinish(userId: string) {
+      const timer = setTimeout(() => setLoading(false), PROFILE_LOAD_TIMEOUT)
+      fetchProfile(userId).finally(() => {
+        clearTimeout(timer)
+        setLoading(false)
+      })
+    }
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else setProfile(null)
-      setLoading(false)
+      if (session?.user) {
+        loadProfileAndFinish(session.user.id)
+      } else {
+        setProfile(null)
+        setLoading(false)
+      }
     })
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else setProfile(null)
-      setLoading(false)
+      if (session?.user) {
+        loadProfileAndFinish(session.user.id)
+      } else {
+        setProfile(null)
+        setLoading(false)
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -35,6 +49,10 @@ export function useAuth() {
       .eq('id', userId)
       .single()
     setProfile(data as Profile | null)
+  }
+
+  async function refetchProfile() {
+    if (user?.id) await fetchProfile(user.id)
   }
 
   async function signIn(email: string, password: string) {
@@ -50,5 +68,5 @@ export function useAuth() {
     setProfile(null)
   }
 
-  return { user, profile, loading, signIn, signOut, isAuthenticated: !!user }
+  return { user, profile, loading, signIn, signOut, refetchProfile, isAuthenticated: !!user }
 }

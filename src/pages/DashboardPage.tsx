@@ -98,7 +98,7 @@ export function DashboardPage() {
         }
       })
       .finally(() => setLoading(false))
-  }, [canSeeCash])
+  }, [outletId, canSeeCash])
 
   const avgTicket = useMemo(() => (todayCount > 0 ? todaySales / todayCount : 0), [todayCount, todaySales])
   const maxWeekly = useMemo(() => Math.max(1, ...weekly.map((d) => d.total)), [weekly])
