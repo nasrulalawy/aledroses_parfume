@@ -251,7 +251,7 @@ export function DashboardLayout() {
           <div className="h-16 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-800">
             <Link to="/" className="flex items-center gap-2">
               <span className="flex h-10 w-10 shrink-0 overflow-hidden rounded-full bg-white dark:bg-white">
-                <img src="/logo.webp" alt="Aledroses" className="h-full w-full object-cover" />
+                <img src="/logo.jpeg" alt="Aledroses" className="h-full w-full object-cover" />
               </span>
             </Link>
             <button
