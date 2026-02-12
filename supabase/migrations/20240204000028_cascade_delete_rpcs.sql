@@ -172,11 +172,12 @@ BEGIN
   IF txn_outlet IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Transaksi tidak ditemukan.');
   END IF;
-  IF public.user_role() = 'manager' AND txn_outlet <> public.my_outlet_id() THEN
+  -- Super admin boleh semua; manager & kasir hanya transaksi outlet sendiri
+  IF public.user_role() IN ('manager', 'karyawan') AND txn_outlet <> public.my_outlet_id() THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Transaksi bukan dari outlet Anda.');
   END IF;
-  IF public.user_role() NOT IN ('super_admin', 'manager') THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'Hanya super admin atau manager yang boleh menghapus transaksi.');
+  IF public.user_role() NOT IN ('super_admin', 'manager', 'karyawan') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Anda tidak punya akses menghapus transaksi.');
   END IF;
 
   -- Hapus cash_flows yang mengacu ke transaksi ini

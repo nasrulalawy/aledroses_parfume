@@ -63,7 +63,7 @@ export function ReportsPage() {
   const [filterBarberId, setFilterBarberId] = useState('')
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<'' | 'cash' | 'transfer' | 'qris' | 'other'>('')
   const [deleteTarget, setDeleteTarget] = useState<TxnRow | null>(null)
-  const canDeleteTxn = profile?.role === 'super_admin' || profile?.role === 'manager'
+  const canDeleteTxn = profile?.role === 'super_admin' || profile?.role === 'manager' || profile?.role === 'karyawan'
 
   useEffect(() => {
     if (!outletId) return
