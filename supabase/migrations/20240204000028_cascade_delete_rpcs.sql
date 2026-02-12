@@ -154,6 +154,41 @@ BEGIN
 END;
 $$;
 
+-- Hapus transaksi beserta data terkait (transaction_items, cash_flows)
+CREATE OR REPLACE FUNCTION public.delete_transaction_cascade(p_transaction_id UUID)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  txn_outlet UUID;
+BEGIN
+  IF p_transaction_id IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'transaction_id wajib.');
+  END IF;
+
+  SELECT outlet_id INTO txn_outlet FROM transactions WHERE id = p_transaction_id;
+  IF txn_outlet IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Transaksi tidak ditemukan.');
+  END IF;
+  IF public.user_role() = 'manager' AND txn_outlet <> public.my_outlet_id() THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Transaksi bukan dari outlet Anda.');
+  END IF;
+  IF public.user_role() NOT IN ('super_admin', 'manager') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Hanya super admin atau manager yang boleh menghapus transaksi.');
+  END IF;
+
+  -- Hapus cash_flows yang mengacu ke transaksi ini
+  DELETE FROM cash_flows WHERE reference_type = 'transaction' AND reference_id = p_transaction_id;
+  -- transaction_items CASCADE saat hapus transactions
+  DELETE FROM transactions WHERE id = p_transaction_id;
+
+  RETURN jsonb_build_object('ok', true);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.delete_transaction_cascade(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_outlet_cascade(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_employee_cascade(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_product_cascade(UUID) TO authenticated;

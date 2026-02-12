@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 
 type ReportPeriod = 'day' | 'month' | 'year'
 
@@ -61,6 +62,8 @@ export function ReportsPage() {
   const [filterProductId, setFilterProductId] = useState('')
   const [filterBarberId, setFilterBarberId] = useState('')
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<'' | 'cash' | 'transfer' | 'qris' | 'other'>('')
+  const [deleteTarget, setDeleteTarget] = useState<TxnRow | null>(null)
+  const canDeleteTxn = profile?.role === 'super_admin' || profile?.role === 'manager'
 
   useEffect(() => {
     if (!outletId) return
@@ -271,6 +274,21 @@ export function ReportsPage() {
 
   function toggle(id: string) {
     setExpanded((p) => ({ ...p, [id]: !p[id] }))
+  }
+
+  async function handleDeleteTxnConfirm() {
+    if (!deleteTarget) return
+    const { data, error } = await supabase.rpc('delete_transaction_cascade', { p_transaction_id: deleteTarget.id })
+    const res = data as { ok?: boolean; error?: string } | null
+    setDeleteTarget(null)
+    if (error || !res?.ok) {
+      alert(res?.error || error?.message || 'Gagal menghapus transaksi')
+      return
+    }
+    // Refetch data
+    if (effectivePeriod === 'day') fetchDaily()
+    else if (effectivePeriod === 'month') fetchMonthly()
+    else fetchYearly()
   }
 
   if (!outletId && !isSuperAdmin) return (
@@ -591,7 +609,7 @@ export function ReportsPage() {
                   <th className="text-right py-3 px-2">Diskon</th>
                   <th className="text-right py-3 px-2">Pajak</th>
                   <th className="text-right py-3 px-2">Total</th>
-                  <th className="w-24 py-3 px-2"></th>
+                  <th className="w-32 py-3 px-2">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -610,11 +628,20 @@ export function ReportsPage() {
                       <td className="py-3 px-2 text-right">
                         <button
                           type="button"
-                          className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                          className="text-sm text-primary-600 hover:text-primary-700 font-medium mr-2"
                           onClick={() => toggle(t.id)}
                         >
                           {expanded[t.id] ? 'Tutup' : 'Detail'}
                         </button>
+                        {canDeleteTxn && (
+                          <button
+                            type="button"
+                            className="text-sm text-red-600 hover:text-red-700 font-medium"
+                            onClick={() => setDeleteTarget(t)}
+                          >
+                            Hapus
+                          </button>
+                        )}
                       </td>
                     </tr>
                     {expanded[t.id] && (
@@ -687,6 +714,13 @@ export function ReportsPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus transaksi"
+        message={deleteTarget ? `Yakin hapus transaksi ${deleteTarget.transaction_number}? Data item dan arus kas terkait akan ikut terhapus.` : ''}
+        onConfirm={handleDeleteTxnConfirm}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
