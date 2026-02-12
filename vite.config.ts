@@ -18,9 +18,9 @@ export default defineConfig({
         enabled: false,
       },
       manifest: {
-        name: 'Aledroses Parfume',
-        short_name: 'Aledroses',
-        description: 'POS & Manajemen Toko Parfum Refill',
+        name: 'Aledroses Group',
+        short_name: 'Aledroses Group',
+        description: 'POS & Manajemen Bisnis Multi Outlet',
         theme_color: '#1e3a5f',
         background_color: '#0f172a',
         display: 'standalone',

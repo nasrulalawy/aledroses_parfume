@@ -135,7 +135,7 @@ export function DashboardPage() {
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
         Selamat datang, {profile?.full_name || profile?.email}
       </h1>
-      <p className="text-gray-600 dark:text-gray-400 mt-1">Aledroses Parfume - Toko Parfum Refill</p>
+      <p className="text-gray-600 dark:text-gray-400 mt-1">Aledroses Group - Manajemen Bisnis Multi Outlet</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
         <div className="card">

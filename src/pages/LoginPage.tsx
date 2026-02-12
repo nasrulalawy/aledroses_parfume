@@ -35,7 +35,7 @@ export function LoginPage() {
         <div className="text-center mb-6">
           <div className="flex justify-center mb-4">
             <span className="flex h-16 w-16 shrink-0 overflow-hidden rounded-full bg-white dark:bg-white ring-2 ring-primary-200 dark:ring-primary-700">
-              <img src="/logo.jpeg" alt="Aledroses" className="h-full w-full object-cover" />
+              <img src="/logo.jpeg" alt="Aledroses Group" className="h-full w-full object-cover" />
             </span>
           </div>
           <h1 className="text-2xl font-bold text-primary-700 dark:text-primary-400">Aledroses Group</h1>
