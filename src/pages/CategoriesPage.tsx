@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import type { Category } from '@/types/database'
 
 export function CategoriesPage() {
+  const { profile } = useAuthContext()
   const { outletId } = useOutlet()
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Category | null>(null)
   const [form, setForm] = useState({ name: '', description: '' })
+  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null)
+  const canEdit = profile?.role === 'super_admin' || profile?.role === 'manager'
 
   useEffect(() => {
     if (!outletId) return
@@ -40,9 +45,15 @@ export function CategoriesPage() {
     setForm({ name: c.name, description: c.description || '' })
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Hapus kategori ini?')) return
-    await supabase.from('categories').delete().eq('id', id)
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return
+    const { data, error } = await supabase.rpc('delete_category_cascade', { p_category_id: deleteTarget.id })
+    const res = data as { ok?: boolean; error?: string } | null
+    setDeleteTarget(null)
+    if (error || !res?.ok) {
+      alert(res?.error || error?.message || 'Gagal menghapus kategori')
+      return
+    }
     fetchCategories()
   }
 
@@ -101,14 +112,25 @@ export function CategoriesPage() {
                 <td className="py-2">{c.name}</td>
                 <td className="py-2 text-gray-600 dark:text-gray-400">{c.description || '-'}</td>
                 <td className="py-2">
-                  <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(c)}>Edit</button>
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(c.id)}>Hapus</button>
+                  {canEdit && (
+                    <>
+                      <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(c)}>Edit</button>
+                      <button type="button" className="text-red-600 hover:underline" onClick={() => setDeleteTarget(c)}>Hapus</button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus kategori"
+        message={deleteTarget ? `Yakin hapus kategori "${deleteTarget.name}"? Kategori yang masih punya produk tidak bisa dihapus.` : ''}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import type { Product, Category } from '@/types/database'
 
 export function ProductsPage() {
+  const { profile } = useAuthContext()
   const { outletId } = useOutlet()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -15,6 +18,8 @@ export function ProductsPage() {
   const [form, setForm] = useState({
     sku: '', name: '', category_id: '', unit: 'pcs', price: 0, cost: 0, stock: 0, is_service: false, is_active: true,
   })
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+  const canEdit = profile?.role === 'super_admin' || profile?.role === 'manager'
 
   useEffect(() => {
     if (!outletId) return
@@ -76,9 +81,15 @@ export function ProductsPage() {
 
   useEffect(() => () => { if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current) }, [])
 
-  async function handleDelete(id: string) {
-    if (!confirm('Hapus produk ini?')) return
-    await supabase.from('products').delete().eq('id', id)
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return
+    const { data, error } = await supabase.rpc('delete_product_cascade', { p_product_id: deleteTarget.id })
+    const res = data as { ok?: boolean; error?: string } | null
+    setDeleteTarget(null)
+    if (error || !res?.ok) {
+      alert(res?.error || error?.message || 'Gagal menghapus produk')
+      return
+    }
     fetchProducts()
   }
 
@@ -170,14 +181,25 @@ export function ProductsPage() {
                 <td className="py-2 text-right">{p.is_service ? '-' : (p.cost != null ? `Rp ${Number(p.cost).toLocaleString('id-ID')}` : '-')}</td>
                 <td className="py-2 text-right">{p.is_service ? '-' : p.stock}</td>
                 <td className="py-2">
-                  <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(p)}>Edit</button>
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(p.id)}>Hapus</button>
+                  {canEdit && (
+                    <>
+                      <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(p)}>Edit</button>
+                      <button type="button" className="text-red-600 hover:underline" onClick={() => setDeleteTarget(p)}>Hapus</button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus produk"
+        message={deleteTarget ? `Yakin hapus produk "${deleteTarget.name}"? Data stok masuk akan ikut terhapus. Produk yang sudah ada di transaksi tidak bisa dihapus.` : ''}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

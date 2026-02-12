@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import type { Outlet, OutletType } from '@/types/database'
 
 const OUTLET_TYPE_OPTIONS: { value: OutletType; label: string }[] = [
@@ -14,6 +15,7 @@ export function OutletsPage() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Outlet | null>(null)
   const [form, setForm] = useState({ name: '', code: '', address: '', outlet_type: 'parfume' as OutletType, is_active: true })
+  const [deleteTarget, setDeleteTarget] = useState<Outlet | null>(null)
 
   const isSuperAdmin = profile?.role === 'super_admin'
 
@@ -87,9 +89,15 @@ export function OutletsPage() {
     })
   }
 
-  async function handleDelete(id: string) {
-    if (!isSuperAdmin || !confirm('Hapus outlet ini? Data terkait (produk, karyawan, dll) harus dipindah atau akan error.')) return
-    await supabase.from('outlets').delete().eq('id', id)
+  async function handleDeleteConfirm() {
+    if (!isSuperAdmin || !deleteTarget) return
+    const { data, error } = await supabase.rpc('delete_outlet_cascade', { p_outlet_id: deleteTarget.id })
+    const res = data as { ok?: boolean; error?: string } | null
+    setDeleteTarget(null)
+    if (error || !res?.ok) {
+      alert(res?.error || error?.message || 'Gagal menghapus outlet')
+      return
+    }
     fetchOutlets()
   }
 
@@ -166,13 +174,20 @@ export function OutletsPage() {
                 <td className="py-2">{o.is_active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="py-2">
                   <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(o)}>Edit</button>
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(o.id)}>Hapus</button>
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => setDeleteTarget(o)}>Hapus</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus outlet"
+        message={deleteTarget ? `Yakin hapus outlet "${deleteTarget.name}"? Semua data terkait (transaksi, produk, kategori, karyawan, shift, absensi, dll) akan ikut terhapus.` : ''}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import type { Employee, CompensationType, EmployeeType } from '@/types/database'
 import type { Attendance } from '@/types/database'
 
@@ -349,6 +350,7 @@ export function EmployeesPage() {
   const [linkAccountError, setLinkAccountError] = useState('')
   const [linkAccountSubmitting, setLinkAccountSubmitting] = useState(false)
   const [detailModal, setDetailModal] = useState<Employee | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null)
   const canEdit = profile?.role === 'super_admin' || profile?.role === 'manager'
   const effectiveOutletId = isSuperAdmin ? (form.outlet_id || outletId) : outletId
 
@@ -431,9 +433,15 @@ export function EmployeesPage() {
     })
   }
 
-  async function handleDelete(id: string) {
-    if (!canEdit || !confirm('Hapus karyawan ini?')) return
-    await supabase.from('employees').delete().eq('id', id)
+  async function handleDeleteConfirm() {
+    if (!canEdit || !deleteTarget) return
+    const { data, error } = await supabase.rpc('delete_employee_cascade', { p_employee_id: deleteTarget.id })
+    const res = data as { ok?: boolean; error?: string } | null
+    setDeleteTarget(null)
+    if (error || !res?.ok) {
+      alert(res?.error || error?.message || 'Gagal menghapus karyawan')
+      return
+    }
     fetchEmployees()
   }
 
@@ -673,7 +681,7 @@ export function EmployeesPage() {
                         </>
                       )}
                       <button type="button" className="text-primary-600 hover:underline mr-2" onClick={() => startEdit(e)}>Edit</button>
-                      <button type="button" className="text-red-600 hover:underline" onClick={() => handleDelete(e.id)}>Hapus</button>
+                      <button type="button" className="text-red-600 hover:underline" onClick={() => setDeleteTarget(e)}>Hapus</button>
                     </>
                   )}
                 </td>
@@ -817,6 +825,13 @@ export function EmployeesPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus karyawan"
+        message={deleteTarget ? `Yakin hapus karyawan "${deleteTarget.nama}"? Data terkait (transaksi, shift, absensi, link akun) akan ikut terhapus.` : ''}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
