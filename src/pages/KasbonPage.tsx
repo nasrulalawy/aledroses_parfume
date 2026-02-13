@@ -32,7 +32,7 @@ export function KasbonPage() {
       .select('id, outlet_id, employee_id, amount, notes, created_at, employees(nama)')
       .eq('outlet_id', outletId)
       .order('created_at', { ascending: false })
-    setList((data as KasbonWithEmployee[]) ?? [])
+    setList((data as unknown as KasbonWithEmployee[]) ?? [])
     setLoading(false)
   }
 
