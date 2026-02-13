@@ -101,6 +101,9 @@ export interface Transaction {
   payment_method: PaymentMethod
   cash_received: number | null
   change: number | null
+  amount_paid?: number | null
+  tip_amount?: number
+  tip_recipient_employee_id?: string | null
   status: 'completed' | 'cancelled' | 'refunded'
   notes: string | null
   created_at: string
@@ -151,13 +154,26 @@ export type CashFlowCategory =
   | 'modal_awal'
   | 'pembelian'
   | 'gaji'
+  | 'kasbon_karyawan'
+  | 'tip'
+  | 'tarik_tunai'
   | 'operasional'
   | 'lainnya'
+
+export interface EmployeeKasbon {
+  id: string
+  outlet_id: string
+  employee_id: string
+  amount: number
+  notes: string | null
+  created_at: string
+}
 
 export interface CashFlow {
   id: string
   outlet_id: string
   shift_id: string | null
+  employee_id?: string | null
   type: CashFlowType
   category: CashFlowCategory
   amount: number

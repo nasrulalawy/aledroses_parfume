@@ -15,6 +15,7 @@ import { ReportsPage } from '@/pages/ReportsPage'
 import { ShiftsPage } from '@/pages/ShiftsPage'
 import { StockPage } from '@/pages/StockPage'
 import { OutletsPage } from '@/pages/OutletsPage'
+import { KasbonPage } from '@/pages/KasbonPage'
 
 function App() {
   return (
@@ -37,8 +38,9 @@ function App() {
           <Route path="categories" element={<ProtectedRoute allowedRoles={['super_admin', 'manager']}><CategoriesPage /></ProtectedRoute>} />
           <Route path="employees" element={<ProtectedRoute allowedRoles={['super_admin', 'manager']}><EmployeesPage /></ProtectedRoute>} />
           <Route path="attendance" element={<AttendancePage />} />
-          <Route path="cash-flow" element={<ProtectedRoute allowedRoles={['super_admin', 'manager']}><CashFlowPage /></ProtectedRoute>} />
+          <Route path="cash-flow" element={<ProtectedRoute allowedRoles={['super_admin', 'manager', 'karyawan']}><CashFlowPage /></ProtectedRoute>} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="kasbon" element={<KasbonPage />} />
           <Route path="shifts" element={<ShiftsPage />} />
           <Route path="outlets" element={<ProtectedRoute allowedRoles={['super_admin']}><OutletsPage /></ProtectedRoute>} />
         </Route>

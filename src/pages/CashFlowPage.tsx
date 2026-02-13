@@ -2,16 +2,21 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthContext } from '@/contexts/AuthContext'
 import { useOutlet } from '@/contexts/OutletContext'
-import type { CashFlow, CashFlowCategory } from '@/types/database'
+import type { CashFlow, CashFlowCategory, Employee } from '@/types/database'
 
 const CATEGORIES: { value: CashFlowCategory; label: string }[] = [
   { value: 'penjualan', label: 'Penjualan' },
   { value: 'modal_awal', label: 'Modal Awal' },
   { value: 'pembelian', label: 'Pembelian' },
   { value: 'gaji', label: 'Gaji' },
+  { value: 'kasbon_karyawan', label: 'Kasbon Karyawan' },
+  { value: 'tip', label: 'Tip (capster/barber)' },
+  { value: 'tarik_tunai', label: 'Tarik Tunai' },
   { value: 'operasional', label: 'Operasional' },
   { value: 'lainnya', label: 'Lainnya' },
 ]
+
+type FlowWithEmployee = CashFlow & { employees?: { nama: string } | null }
 
 export function CashFlowPage() {
   const { profile } = useAuthContext()
@@ -21,8 +26,9 @@ export function CashFlowPage() {
   const [fromDate, setFromDate] = useState(new Date().toISOString().slice(0, 10))
   const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10))
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ type: 'in' as 'in' | 'out', category: 'lainnya' as CashFlowCategory, amount: '', description: '' })
-  const canAdd = profile?.role === 'super_admin' || profile?.role === 'manager'
+  const [form, setForm] = useState({ type: 'in' as 'in' | 'out', category: 'lainnya' as CashFlowCategory, amount: '', description: '', employee_id: '' })
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const canAdd = profile?.role === 'super_admin' || profile?.role === 'manager' || profile?.role === 'karyawan'
 
   useEffect(() => {
     if (!outletId && !isSuperAdmin) return
@@ -30,16 +36,21 @@ export function CashFlowPage() {
     fetchFlows()
   }, [outletId, fromDate, toDate, isSuperAdmin])
 
+  useEffect(() => {
+    if (!outletId) return
+    supabase.from('employees').select('id, nama').eq('outlet_id', outletId).eq('is_active', true).order('nama').then(({ data }) => setEmployees((data as Employee[]) ?? []))
+  }, [outletId])
+
   async function fetchFlows() {
     if (!outletId) return
     const { data } = await supabase
       .from('cash_flows')
-      .select('*')
+      .select('*, employees(nama)')
       .eq('outlet_id', outletId)
       .gte('created_at', fromDate)
       .lte('created_at', toDate + 'T23:59:59')
       .order('created_at', { ascending: false })
-    setFlows((data as CashFlow[]) ?? [])
+    setFlows((data as FlowWithEmployee[]) ?? [])
     setLoading(false)
   }
 
@@ -51,15 +62,20 @@ export function CashFlowPage() {
       alert('Nominal harus lebih dari 0')
       return
     }
+    if (form.category === 'tarik_tunai' && form.type === 'out' && !form.employee_id) {
+      alert('Pilih karyawan yang menarik tunai')
+      return
+    }
     await supabase.from('cash_flows').insert({
       outlet_id: outletId,
       type: form.type,
       category: form.category,
       amount,
       description: form.description || null,
+      employee_id: form.category === 'tarik_tunai' && form.employee_id ? form.employee_id : null,
     })
     setShowForm(false)
-    setForm({ type: 'in', category: 'lainnya', amount: '', description: '' })
+    setForm({ type: 'in', category: 'lainnya', amount: '', description: '', employee_id: '' })
     fetchFlows()
   }
 
@@ -113,7 +129,10 @@ export function CashFlowPage() {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Kategori</label>
-            <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value as CashFlowCategory }))} className="input">
+            <select value={form.category} onChange={(e) => {
+              const cat = e.target.value as CashFlowCategory
+              setForm((f) => ({ ...f, category: cat, type: cat === 'tarik_tunai' ? 'out' : f.type }))
+            }} className="input">
               {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </div>
@@ -125,6 +144,18 @@ export function CashFlowPage() {
             <label className="block text-sm font-medium mb-1">Keterangan</label>
             <input type="text" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className="input" />
           </div>
+          {form.category === 'tarik_tunai' && form.type === 'out' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Karyawan yang menarik *</label>
+              <select value={form.employee_id} onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))} className="input" required>
+                <option value="">Pilih karyawan</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>{e.nama}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Karyawan yang menarik tunai (karena terima QRIS/transfer ke rekening pribadi)</p>
+            </div>
+          )}
           <div className="flex gap-2">
             <button type="submit" className="btn-primary">Simpan</button>
             <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Batal</button>
@@ -140,6 +171,7 @@ export function CashFlowPage() {
               <th className="text-left py-2">Kategori</th>
               <th className="text-right py-2">Nominal</th>
               <th className="text-left py-2">Keterangan</th>
+              <th className="text-left py-2">Karyawan</th>
             </tr>
           </thead>
           <tbody>
@@ -152,6 +184,7 @@ export function CashFlowPage() {
                   {f.type === 'in' ? '+' : '-'} Rp {Number(f.amount).toLocaleString('id-ID')}
                 </td>
                 <td className="py-2">{f.description || '-'}</td>
+                <td className="py-2">{(f as FlowWithEmployee).employees?.nama ?? '-'}</td>
               </tr>
             ))}
           </tbody>

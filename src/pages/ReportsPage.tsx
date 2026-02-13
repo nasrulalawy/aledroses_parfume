@@ -34,8 +34,12 @@ type TxnRow = {
   total: number
   cash_received: number | null
   change: number | null
+  amount_paid?: number | null
+  tip_amount?: number
+  tip_recipient_employee_id?: string | null
   barber_id: string | null
   employees?: { nama: string } | null
+  tip_recipient?: { nama: string } | null
   transaction_items?: TxnItemRow[] | null
 }
 
@@ -103,7 +107,7 @@ export function ReportsPage() {
   }, [outletId, period, date, month, year, filterPaymentMethod, isKasir])
 
   function txnSelect() {
-    return 'id, transaction_number, created_at, payment_method, subtotal, discount, tax, total, cash_received, change, barber_id, employees!transactions_employee_id_fkey(nama), transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, category_id, cost))'
+    return 'id, transaction_number, created_at, payment_method, subtotal, discount, tax, total, cash_received, change, amount_paid, tip_amount, tip_recipient_employee_id, barber_id, employees!transactions_employee_id_fkey(nama), tip_recipient:employees!transactions_tip_recipient_employee_id_fkey(nama), transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, category_id, cost))'
   }
 
   async function fetchDaily() {
@@ -654,6 +658,8 @@ export function ReportsPage() {
                                 <p className="text-sm text-gray-800 dark:text-gray-200">
                                   {t.payment_method === 'cash' && t.cash_received != null
                                     ? `Tunai: diterima Rp ${Number(t.cash_received).toLocaleString('id-ID')}, kembalian Rp ${Number(t.change ?? 0).toLocaleString('id-ID')}`
+                                    : (t.amount_paid != null && Number(t.amount_paid) > (t.total ?? 0))
+                                    ? `Transfer/QRIS: dibayar Rp ${Number(t.amount_paid).toLocaleString('id-ID')}, tip Rp ${Number(t.tip_amount ?? 0).toLocaleString('id-ID')} → ${t.tip_recipient?.nama ?? '-'}`
                                     : 'Non-tunai (transfer/QRIS)'}
                                 </p>
                               </div>

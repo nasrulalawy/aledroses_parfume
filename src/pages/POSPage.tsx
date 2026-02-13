@@ -13,11 +13,14 @@ export function POSPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [barbers, setBarbers] = useState<Employee[]>([])
+  const [staffForTip, setStaffForTip] = useState<Employee[]>([])
   const [selectedBarberId, setSelectedBarberId] = useState<string>('')
   const [filterCat, setFilterCat] = useState<string>('')
   const [search, setSearch] = useState('')
   const [payModal, setPayModal] = useState(false)
   const [cashReceived, setCashReceived] = useState('')
+  const [amountPaid, setAmountPaid] = useState('')
+  const [tipRecipientId, setTipRecipientId] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'qris'>('cash')
   const [processing, setProcessing] = useState(false)
   const [currentShiftId, setCurrentShiftId] = useState<string | null>(null)
@@ -29,10 +32,14 @@ export function POSPage() {
     supabase.from('categories').select('*').eq('outlet_id', outletId).order('name').then(({ data }) => setCategories((data as Category[]) ?? []))
     supabase.from('products').select('*').eq('outlet_id', outletId).eq('is_active', true).order('name').then(({ data }) => setProducts((data as Product[]) ?? []))
     if (isBarbershop) {
-      supabase.from('employees').select('*').eq('outlet_id', outletId).eq('employee_type', 'barber').eq('is_active', true).order('nama').then(({ data }) => setBarbers((data as Employee[]) ?? []))
+      supabase.from('employees').select('*').eq('outlet_id', outletId).eq('employee_type', 'barber').eq('is_active', true).order('nama').then(({ data }) => {
+        setBarbers((data as Employee[]) ?? [])
+        setStaffForTip((data as Employee[]) ?? [])
+      })
     } else {
       setBarbers([])
       setSelectedBarberId('')
+      supabase.from('employees').select('*').eq('outlet_id', outletId).eq('is_active', true).order('nama').then(({ data }) => setStaffForTip((data as Employee[]) ?? []))
     }
     if (profile?.employee_id) {
       const today = new Date().toISOString().slice(0, 10)
@@ -81,6 +88,12 @@ export function POSPage() {
       alert('Pilih barber terlebih dahulu.')
       return
     }
+    const paid = paymentMethod !== 'cash' ? (Number(amountPaid) || total) : total
+    const tipAmt = paid > total ? paid - total : 0
+    if (tipAmt > 0 && !tipRecipientId) {
+      alert('Pilih penerima tip (kelebihan pembayaran akan diambil sebagai cash oleh capster/staff).')
+      return
+    }
     setProcessing(true)
     const transactionNumber = await generateTransactionNumber()
     const itemsSubtotal = getItemsSubtotal()
@@ -88,6 +101,9 @@ export function POSPage() {
     const tax = (afterDiscount * taxRate) / 100
     const cashVal = paymentMethod === 'cash' ? Number(cashReceived) : null
     const changeVal = paymentMethod === 'cash' && cashVal ? cashVal - total : null
+    const amountPaidVal = paymentMethod !== 'cash' ? (Number(amountPaid) || total) : null
+    const tipAmountVal = amountPaidVal && amountPaidVal > total ? amountPaidVal - total : 0
+    const tipRecipientVal = tipAmountVal > 0 && tipRecipientId ? tipRecipientId : null
 
     if (!outletId) {
       alert('Outlet tidak tersedia.')
@@ -112,6 +128,9 @@ export function POSPage() {
           payment_method: paymentMethod,
           cash_received: cashVal,
           change: changeVal,
+          amount_paid: amountPaidVal,
+          tip_amount: tipAmountVal,
+          tip_recipient_employee_id: tipRecipientVal,
           status: 'completed',
         })
         .select('id')
@@ -138,7 +157,7 @@ export function POSPage() {
         throw new Error(`2. Simpan item transaksi: ${itemsErr.message}`)
       }
 
-      // 3. Catat arus kas (penjualan)
+      // 3. Catat arus kas (penjualan + tip jika ada)
       if (paymentMethod === 'cash' || paymentMethod === 'transfer' || paymentMethod === 'qris') {
         const { error: cashErr } = await supabase.from('cash_flows').insert({
           outlet_id: outletId,
@@ -152,6 +171,21 @@ export function POSPage() {
         })
         if (cashErr) {
           throw new Error(`3. Catat arus kas: ${cashErr.message}. Pastikan karyawan punya Outlet (menu Karyawan → Edit → Outlet).`)
+        }
+        if (tipAmountVal > 0 && tipRecipientVal) {
+          const tipRecipient = staffForTip.find((e) => e.id === tipRecipientVal)
+          const { error: tipErr } = await supabase.from('cash_flows').insert({
+            outlet_id: outletId,
+            shift_id: currentShiftId,
+            type: 'out',
+            category: 'tip',
+            amount: tipAmountVal,
+            description: `Tip - ${transactionNumber} - ${tipRecipient?.nama ?? '-'}`,
+            reference_type: 'transaction',
+            reference_id: txn.id,
+            employee_id: tipRecipientVal,
+          })
+          if (tipErr) throw new Error(`3b. Catat tip: ${tipErr.message}`)
         }
       }
 
@@ -171,6 +205,8 @@ export function POSPage() {
       setPayModal(false)
       setCashReceived('')
       if (isBarbershop) setSelectedBarberId('')
+      setAmountPaid('')
+      setTipRecipientId('')
       alert(`Transaksi ${transactionNumber} berhasil.`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Gagal menyimpan transaksi'
@@ -308,7 +344,7 @@ export function POSPage() {
             <h3 className="font-semibold text-lg">Pembayaran</h3>
             <div className="mt-2">
               <label className="block text-sm">Metode</label>
-              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as 'cash' | 'transfer' | 'qris')} className="input">
+              <select value={paymentMethod} onChange={(e) => { setPaymentMethod(e.target.value as 'cash' | 'transfer' | 'qris'); setAmountPaid(''); setTipRecipientId(''); }} className="input">
                 <option value="cash">Tunai</option>
                 <option value="transfer">Transfer</option>
                 <option value="qris">QRIS</option>
@@ -323,9 +359,32 @@ export function POSPage() {
                 {Number(cashReceived) >= total && <p className="mt-2 text-green-600">Kembalian: Rp {change.toLocaleString('id-ID')}</p>}
               </>
             )}
+            {(paymentMethod === 'transfer' || paymentMethod === 'qris') && (
+              <>
+                <div className="mt-2">
+                  <label className="block text-sm">Jumlah dibayar pelanggan</label>
+                  <input type="number" min={0} value={amountPaid || total} onChange={(e) => setAmountPaid(e.target.value)} className="input" placeholder={String(total)} />
+                  <p className="text-xs text-gray-500 mt-0.5">Kosongkan = sama dengan total. Jika lebih, selisih = tip untuk capster/staff.</p>
+                </div>
+                {(Number(amountPaid) || total) > total && (
+                  <div className="mt-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Tip: Rp {((Number(amountPaid) || total) - total).toLocaleString('id-ID')}</p>
+                    <div className="mt-2">
+                      <label className="block text-xs">Penerima tip (cash dari kas)</label>
+                      <select value={tipRecipientId} onChange={(e) => setTipRecipientId(e.target.value)} className="input mt-1 text-sm" required>
+                        <option value="">Pilih capster/staff</option>
+                        {staffForTip.map((e) => (
+                          <option key={e.id} value={e.id}>{e.nama}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             <p className="mt-2 font-medium">Total: Rp {total.toLocaleString('id-ID')}</p>
             <div className="flex gap-2 mt-4">
-              <button type="button" className="btn-secondary flex-1" onClick={() => { setPayModal(false); setCashReceived(''); }}>Batal</button>
+              <button type="button" className="btn-secondary flex-1" onClick={() => { setPayModal(false); setCashReceived(''); setAmountPaid(''); setTipRecipientId(''); }}>Batal</button>
               <button type="button" className="btn-primary flex-1" onClick={handlePayment} disabled={processing}>Selesai</button>
             </div>
           </div>
