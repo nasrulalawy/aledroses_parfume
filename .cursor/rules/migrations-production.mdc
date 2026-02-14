@@ -1,0 +1,33 @@
+---
+description: Aturan migrasi database production - tidak boleh ada data yang terhapus saat migration/push
+globs: supabase/migrations/**/*.sql
+alwaysApply: false
+---
+
+# Migrasi Database (Production-Safe)
+
+**Kesepakatan:** Database sudah production. Setiap migration / `supabase db push` **tidak boleh menghapus data** yang sudah ada.
+
+## Yang BOLEH (aman)
+
+- **ADD kolom:** `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`
+- **ADD constraint/index:** `CREATE INDEX IF NOT EXISTS ...`, constraint baru dengan pengecekan
+- **Enum:** tambah value dengan cek `IF NOT EXISTS` (DO $$ ... END $$)
+- **Fungsi/RPC:** `CREATE OR REPLACE FUNCTION ...` (tidak menghapus data)
+- **Policy:** `DROP POLICY IF EXISTS ...` lalu `CREATE POLICY ...` (hanya mengubah akses, tidak menghapus row)
+- **Comment:** `COMMENT ON COLUMN ...`
+
+## Yang TIDAK BOLEH di migration
+
+- **Jangan** `DROP TABLE`
+- **Jangan** `DROP COLUMN` (kalau kolom tidak dipakai lagi: biarkan/deprecate, atau renama + kolom baru)
+- **Jangan** `DELETE FROM tabel` di dalam file migration (hapus data hanya lewat aplikasi/RPC yang disengaja)
+- **Jangan** `TRUNCATE`
+
+## Jika perlu ubah struktur yang “breaking”
+
+- Tambah kolom baru, isi/backfill dari kolom lama, lalu di aplikasi pindah ke kolom baru. Kolom lama bisa dibiarkan nullable/tidak dipakai, jangan di-DROP tanpa kesepakatan eksplisit dan backup.
+
+## Referensi
+
+- Kebijakan lengkap: `supabase/MIGRATION_POLICY.md`

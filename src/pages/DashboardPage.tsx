@@ -19,13 +19,14 @@ export function DashboardPage() {
     if (!outletId && !isSuperAdmin) return
     if (!outletId) return
     const today = new Date()
-    const todayDate = today.toISOString().slice(0, 10)
-    const start = `${todayDate}T00:00:00`
-    const end = `${todayDate}T23:59:59`
+    const todayLocalStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const start = `${todayLocalStr}T00:00:00`
+    const end = `${todayLocalStr}T23:59:59`
 
     const weekStartDate = new Date(today)
     weekStartDate.setDate(today.getDate() - 6)
-    const weekStart = `${weekStartDate.toISOString().slice(0, 10)}T00:00:00`
+    const weekStartStr = `${weekStartDate.getFullYear()}-${String(weekStartDate.getMonth() + 1).padStart(2, '0')}-${String(weekStartDate.getDate()).padStart(2, '0')}`
+    const weekStart = `${weekStartStr}T00:00:00`
 
     setLoading(true)
 
@@ -79,7 +80,7 @@ export function DashboardPage() {
         for (let i = 0; i < 7; i++) {
           const d = new Date(weekStartDate)
           d.setDate(weekStartDate.getDate() + i)
-          const key = d.toISOString().slice(0, 10)
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
           days.push({ date: key, total: byDay[key]?.total ?? 0, count: byDay[key]?.count ?? 0 })
         }
         setWeekly(days)

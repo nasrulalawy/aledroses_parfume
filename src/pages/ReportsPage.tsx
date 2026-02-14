@@ -53,8 +53,15 @@ export function ReportsPage() {
   const isKasir = profile?.role === 'karyawan'
   const isBarbershop = outlet?.outlet_type === 'barbershop'
   const [period, setPeriod] = useState<ReportPeriod>('day')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
+  function todayLocal() {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const [date, setDate] = useState(() => todayLocal())
+  const [month, setMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
   const [year, setYear] = useState(new Date().getFullYear().toString())
   const [loading, setLoading] = useState(true)
   const [txns, setTxns] = useState<TxnRow[]>([])
@@ -67,6 +74,7 @@ export function ReportsPage() {
   const [filterBarberId, setFilterBarberId] = useState('')
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<'' | 'cash' | 'transfer' | 'qris' | 'other'>('')
   const [deleteTarget, setDeleteTarget] = useState<TxnRow | null>(null)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const canDeleteTxn = profile?.role === 'super_admin' || profile?.role === 'manager' || profile?.role === 'karyawan'
 
   useEffect(() => {
@@ -106,13 +114,20 @@ export function ReportsPage() {
     else fetchYearly()
   }, [outletId, period, date, month, year, filterPaymentMethod, isKasir])
 
+  /** Select lengkap (termasuk amount_paid, tip). Gagal jika kolom belum ada di DB. */
   function txnSelect() {
     return 'id, transaction_number, created_at, payment_method, subtotal, discount, tax, total, cash_received, change, amount_paid, tip_amount, tip_recipient_employee_id, barber_id, employees!transactions_employee_id_fkey(nama), tip_recipient:employees!transactions_tip_recipient_employee_id_fkey(nama), transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, category_id, cost))'
+  }
+
+  /** Select tanpa kolom tip/amount_paid — dipakai fallback jika schema belum punya kolom tersebut. */
+  function txnSelectMinimal() {
+    return 'id, transaction_number, created_at, payment_method, subtotal, discount, tax, total, cash_received, change, barber_id, employees!transactions_employee_id_fkey(nama), transaction_items(product_id, qty, unit_price, discount, total, products(id, name, sku, category_id, cost))'
   }
 
   async function fetchDaily() {
     if (!outletId) return
     setLoading(true)
+    setFetchError(null)
     const start = `${date}T00:00:00`
     const end = `${date}T23:59:59`
     let q = supabase
@@ -125,7 +140,24 @@ export function ReportsPage() {
       .order('created_at', { ascending: true })
       .limit(500)
     if (filterPaymentMethod) q = q.eq('payment_method', filterPaymentMethod)
-    const { data } = await q
+    let { data, error } = await q
+    if (error && /amount_paid|schema cache|column.*not found/i.test(error.message)) {
+      let q2 = supabase
+        .from('transactions')
+        .select(txnSelectMinimal())
+        .eq('outlet_id', outletId)
+        .eq('status', 'completed')
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: true })
+        .limit(500)
+      if (filterPaymentMethod) q2 = q2.eq('payment_method', filterPaymentMethod)
+      const res2 = await q2
+      data = res2.data
+      error = res2.error
+    }
+    if (error) setFetchError(error.message)
+    else setFetchError(null)
     setTxns(((data as unknown) as TxnRow[]) ?? [])
     setExpanded({})
     setLoading(false)
@@ -134,6 +166,7 @@ export function ReportsPage() {
   async function fetchMonthly() {
     if (!outletId) return
     setLoading(true)
+    setFetchError(null)
     const start = `${month}-01T00:00:00`
     const endOfMonth = new Date(parseInt(month.slice(0, 4), 10), parseInt(month.slice(5, 7), 10), 0)
     const end = `${month}-${String(endOfMonth.getDate()).padStart(2, '0')}T23:59:59`
@@ -147,7 +180,24 @@ export function ReportsPage() {
       .order('created_at', { ascending: true })
       .limit(2000)
     if (filterPaymentMethod) q = q.eq('payment_method', filterPaymentMethod)
-    const { data } = await q
+    let { data, error } = await q
+    if (error && /amount_paid|schema cache|column.*not found/i.test(error.message)) {
+      let q2 = supabase
+        .from('transactions')
+        .select(txnSelectMinimal())
+        .eq('outlet_id', outletId)
+        .eq('status', 'completed')
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: true })
+        .limit(2000)
+      if (filterPaymentMethod) q2 = q2.eq('payment_method', filterPaymentMethod)
+      const res2 = await q2
+      data = res2.data
+      error = res2.error
+    }
+    if (error) setFetchError(error.message)
+    else setFetchError(null)
     setTxns(((data as unknown) as TxnRow[]) ?? [])
     setExpanded({})
     setLoading(false)
@@ -156,6 +206,7 @@ export function ReportsPage() {
   async function fetchYearly() {
     if (!outletId) return
     setLoading(true)
+    setFetchError(null)
     const start = `${year}-01-01T00:00:00`
     const end = `${year}-12-31T23:59:59`
     let q = supabase
@@ -168,7 +219,24 @@ export function ReportsPage() {
       .order('created_at', { ascending: true })
       .limit(10000)
     if (filterPaymentMethod) q = q.eq('payment_method', filterPaymentMethod)
-    const { data } = await q
+    let { data, error } = await q
+    if (error && /amount_paid|schema cache|column.*not found/i.test(error.message)) {
+      let q2 = supabase
+        .from('transactions')
+        .select(txnSelectMinimal())
+        .eq('outlet_id', outletId)
+        .eq('status', 'completed')
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: true })
+        .limit(10000)
+      if (filterPaymentMethod) q2 = q2.eq('payment_method', filterPaymentMethod)
+      const res2 = await q2
+      data = res2.data
+      error = res2.error
+    }
+    if (error) setFetchError(error.message)
+    else setFetchError(null)
     setTxns(((data as unknown) as TxnRow[]) ?? [])
     setExpanded({})
     setLoading(false)
@@ -398,6 +466,13 @@ export function ReportsPage() {
           )}
         </div>
       </div>
+      {fetchError && (
+        <div className="mt-4 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200">
+          <p className="font-medium">Gagal memuat data laporan</p>
+          <p className="text-sm mt-1">{fetchError}</p>
+          <p className="text-sm mt-2">Pastikan migration kolom amount_paid/tip sudah dijalankan di Supabase (Dashboard → SQL Editor).</p>
+        </div>
+      )}
       {loading ? (
         <div className="mt-4">Memuat...</div>
       ) : (
